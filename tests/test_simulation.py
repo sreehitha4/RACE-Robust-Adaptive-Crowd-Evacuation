@@ -21,41 +21,45 @@ class TestMovementAndCollisions:
         manager = AgentManager(building)
         resolver = MovementResolver(building, manager)
 
-        # Agent placed adjacent to West Exit (0, 15)
-        agent = Agent(agent_id=1, start_pos=(1, 15))
-        agent.set_path([(1, 15), (0, 15)], target_exit=(0, 15))
+        # Agent placed near West Exit (0, 16)
+        agent = Agent(agent_id=1, start_pos=(1.0, 16.5))
+        agent.set_path([(1, 16), (0, 16)], target_exit=(0, 16))
         manager.agents.append(agent)
         manager._agents_by_id[1] = agent
 
-        moved = resolver.step(current_tick=1)
-        assert moved == 1
-        assert agent.current_pos == (0, 15)
+        # Step continuous physics until reaching exit
+        for tick in range(1, 30):
+            resolver.step(current_tick=tick, dt=0.08)
+            if agent.is_evacuated:
+                break
+
         assert agent.is_evacuated is True
-        assert agent.evacuation_tick == 1
+        assert agent.evacuation_tick is not None
 
     def test_destination_contention_no_overlap(self) -> None:
-        """Two agents competing for the exact same destination cell."""
+        """Two agents competing for destination are kept apart by social forces."""
         building = Building.create_default()
         manager = AgentManager(building)
         resolver = MovementResolver(building, manager)
 
-        # Agent 1 at (2, 14), Agent 2 at (2, 16). Both want (2, 15)
-        a1 = Agent(agent_id=1, start_pos=(2, 14))
+        # Agent 1 at (2, 14), Agent 2 at (2, 16). Both moving towards (2, 15)
+        a1 = Agent(agent_id=1, start_pos=(2.0, 14.0))
         a1.set_path([(2, 14), (2, 15)])
 
-        a2 = Agent(agent_id=2, start_pos=(2, 16))
+        a2 = Agent(agent_id=2, start_pos=(2.0, 16.0))
         a2.set_path([(2, 16), (2, 15)])
 
         manager.agents.extend([a1, a2])
         manager._agents_by_id[1] = a1
         manager._agents_by_id[2] = a2
 
-        moved = resolver.step(current_tick=1)
-        # Exactly one agent moves, one stays
-        assert moved == 1
-        assert a1.current_pos != a2.current_pos
-        assert (a1.current_pos == (2, 15) and a2.current_pos == (2, 16)) or \
-               (a2.current_pos == (2, 15) and a1.current_pos == (2, 14))
+        # Step continuous physics
+        for tick in range(1, 20):
+            resolver.step(current_tick=tick, dt=0.05)
+
+        # Social forces must keep them separated (distance > sum of body radii)
+        dist = a1.pos.distance_to(a2.pos)
+        assert dist >= 0.35  # No physical overlap allowed!
 
     def test_head_on_swap_prevention(self) -> None:
         """Agent 1 at A wants B, Agent 2 at B wants A."""
@@ -103,9 +107,9 @@ class TestSimulationEngineLifecycle:
         assert engine.state == SimulationState.RUNNING
 
         # Step until all evacuated or max limit reached
-        max_ticks = 200
+        max_ticks = 600
         while engine.state == SimulationState.RUNNING and engine.current_tick < max_ticks:
-            engine.step()
+            engine.step(dt=0.08)
 
         assert engine.state == SimulationState.COMPLETED
         summary = engine.get_summary()
@@ -169,3 +173,31 @@ class TestSimulationEngineLifecycle:
         # Switch back to normal flow
         engine.set_mode(CrowdMode.NORMAL_FLOW)
         assert engine.crowd_mode == CrowdMode.NORMAL_FLOW
+
+
+    def test_social_force_repulsion_mechanics(self) -> None:
+        """Verify Helbing's Social Force repulsion between two approaching individuals."""
+        from simulation.physics import SocialForceModel, Vector2
+        sfm = SocialForceModel()
+
+        # Two agents facing each other with 0.5m distance
+        pos1 = Vector2(5.0, 5.0)
+        pos2 = Vector2(5.5, 5.0)
+        vel1 = Vector2(1.0, 0.0)
+        vel2 = Vector2(-1.0, 0.0)
+
+        # Force on agent 1 from agent 2 must point left (-x direction)
+        force_on_1 = sfm.compute_agent_repulsion(pos1, vel1, radius_i=0.35, pos_j=pos2, vel_j=vel2, radius_j=0.35)
+        assert force_on_1.x < 0  # Repelled away from agent 2!
+
+    def test_interactive_hazard_placement_and_rerouting(self, engine: SimulationEngine) -> None:
+        """Verify placing a fire hazard dynamically triggers BFS re-routing."""
+        hazard_pos = (5, 5)
+        assert engine.add_hazard(*hazard_pos) is True
+        assert hazard_pos in engine.building.hazards
+        assert engine.building.grid.is_wall(*hazard_pos) is True
+
+        # Remove hazard
+        assert engine.remove_hazard(*hazard_pos) is True
+        assert hazard_pos not in engine.building.hazards
+        assert engine.building.grid.is_walkable(*hazard_pos) is True

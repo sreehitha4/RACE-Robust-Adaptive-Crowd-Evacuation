@@ -1,10 +1,12 @@
-"""Main entry point for the Crowd Evacuation & Normal Pedestrian Simulation.
+"""Main application entry point for the Continuous Crowd Simulator.
 
 Features:
-  - Dual Mode: Normal Everyday Crowd Flow vs. Emergency Evacuation.
-  - 4 Distinct Building Exits (North, South Main Egress, West, East).
-  - Smooth 60 FPS sub-pixel continuous walking animation.
-  - Interactive Mode Toggle, Speed Control, and Dynamic Rerouting.
+  - Helbing Social Force Model continuous physics.
+  - Interactive Mouse Tools: Inspect Person, Drop Fire Hazard, Spawn Person.
+  - Social Group Dynamics: Friends & pairs walking together with mutual cohesion.
+  - Dual Mode: Normal Continuous Circulation vs Emergency Egress.
+  - Dynamic Real-Time Crowd Density Heatmap.
+  - 4 Cardinal Egress Portals in an expansive campus complex.
 """
 
 import sys
@@ -12,38 +14,35 @@ import pygame
 from environment.building import Building
 from simulation.engine import SimulationEngine, SimulationState, CrowdMode
 from visualization.renderer import BuildingRenderer
-from visualization.dashboard import Dashboard, Button
+from visualization.dashboard import Dashboard, Button, MouseTool
+from agents.agent import PanicLevel
 
 
 def create_simulation_app() -> None:
-    """Initialize and run the crowd simulation application."""
     pygame.init()
     pygame.font.init()
 
-    # Geometry setup
-    grid_cols = 30
-    grid_rows = 20
-    cell_size = 28
-    margin_left = 30
-    margin_top = 50
+    # Geometry setup for expansive campus complex
+    grid_cols = 34
+    grid_rows = 22
+    cell_size = 24
+    margin_left = 20
+    margin_top = 40
 
     grid_px_w = grid_cols * cell_size
     grid_px_h = grid_rows * cell_size
 
-    dash_x = margin_left + grid_px_w + 30
+    dash_x = margin_left + grid_px_w + 20
     dash_w = 340
-    window_w = dash_x + dash_w + 24
-    window_h = max(grid_px_h + margin_top + 60, 680)
+    window_w = dash_x + dash_w + 20
+    window_h = max(grid_px_h + margin_top + 50, 680)
 
-    # Initialize Pygame Display
     screen = pygame.display.set_mode((window_w, window_h))
-    pygame.display.set_caption("2D Crowd Simulation — Normal Pedestrian Dynamics & Evacuation")
+    pygame.display.set_caption("2D Continuous Crowd Simulator — Social Force Model & BFS")
     clock = pygame.time.Clock()
 
-    # Domain instances
     building = Building.create_default(width=grid_cols, height=grid_rows)
-    # Starts in Normal Crowd Flow mode by default!
-    engine = SimulationEngine(building=building, agent_count=20, seed=42)
+    engine = SimulationEngine(building=building, agent_count=30, seed=42)
     renderer = BuildingRenderer(
         building=building,
         cell_size=cell_size,
@@ -51,20 +50,38 @@ def create_simulation_app() -> None:
         offset_y=margin_top
     )
 
-    # Dashboard instance
     dashboard = Dashboard(
         x=dash_x,
-        y=margin_top - 20,
+        y=margin_top - 15,
         width=dash_w,
-        height=window_h - margin_top
+        height=window_h - margin_top + 5
     )
 
     # Simulation speed parameters
     speed_levels = [1.0, 2.0, 4.0, 0.5]
     speed_idx = 0
-    base_tick_delay_ms = 220.0
+    base_tick_delay_ms = 40.0  # High-frequency continuous physics integration
 
-    # Button Callbacks
+    # Tool callbacks
+    def set_tool_inspect() -> None:
+        dashboard.active_tool = MouseTool.INSPECT
+        tool_inspect_btn.is_active = True
+        tool_hazard_btn.is_active = False
+        tool_spawn_btn.is_active = False
+
+    def set_tool_hazard() -> None:
+        dashboard.active_tool = MouseTool.PLACE_HAZARD
+        tool_inspect_btn.is_active = False
+        tool_hazard_btn.is_active = True
+        tool_spawn_btn.is_active = False
+
+    def set_tool_spawn() -> None:
+        dashboard.active_tool = MouseTool.SPAWN_PERSON
+        tool_inspect_btn.is_active = False
+        tool_hazard_btn.is_active = False
+        tool_spawn_btn.is_active = True
+
+    # Mode and state callbacks
     def on_start() -> None:
         engine.start()
 
@@ -86,73 +103,98 @@ def create_simulation_app() -> None:
         speed_btn.text = f"Speed: {speed_levels[speed_idx]:.1f}x"
 
     def on_toggle_mode() -> None:
-        """Toggle between Normal Crowd Flow and Emergency Evacuation."""
         if engine.crowd_mode == CrowdMode.NORMAL_FLOW:
             engine.set_mode(CrowdMode.EVACUATION)
-            mode_toggle_btn.text = "🏢 Switch to Normal Flow"
+            mode_toggle_btn.text = "🏢 Normal Crowd Flow"
             mode_toggle_btn.bg_color = (39, 174, 96)
-            mode_toggle_btn.hover_color = (46, 204, 113)
         else:
             engine.set_mode(CrowdMode.NORMAL_FLOW)
             mode_toggle_btn.text = "🚨 Trigger Evacuation"
             mode_toggle_btn.bg_color = (192, 57, 43)
-            mode_toggle_btn.hover_color = (231, 76, 60)
 
-    def on_toggle_west_exit() -> None:
-        # West exit cells: (0, 15) and (0, 16)
-        engine.toggle_exit_block((0, 15))
-        is_blocked = engine.toggle_exit_block((0, 16))
-        if is_blocked:
-            block_btn.text = "Unblock West Exit"
-            block_btn.bg_color = (192, 57, 43)
-            block_btn.hover_color = (231, 76, 60)
-        else:
-            block_btn.text = "Block West Exit (Test Rerouting)"
-            block_btn.bg_color = (211, 84, 0)
-            block_btn.hover_color = (230, 126, 34)
+    def on_toggle_heatmap() -> None:
+        renderer.show_heatmap = not renderer.show_heatmap
+        heatmap_btn.text = "Heatmap: ON" if renderer.show_heatmap else "Heatmap: OFF"
+        heatmap_btn.bg_color = (241, 196, 15) if renderer.show_heatmap else (52, 73, 94)
 
-    # Dashboard Button Layout
-    btn_start_y = dashboard.rect.top + 330
-    btn_w = dash_w - 32
-    btn_h = 32
-    gap = 7
+    # Panic Modulator callbacks
+    def set_calm() -> None:
+        engine.set_panic(PanicLevel.CALM)
+        calm_btn.is_active = True
+        alert_btn.is_active = False
+        panic_btn.is_active = False
 
-    btn_x = dash_x + 16
+    def set_alert() -> None:
+        engine.set_panic(PanicLevel.ALERT)
+        calm_btn.is_active = False
+        alert_btn.is_active = True
+        panic_btn.is_active = False
 
-    # Row 1: Start & Pause
-    dashboard.add_button(Button((btn_x, btn_start_y, btn_w // 2 - 4, btn_h), "Start", on_start, bg_color=(39, 174, 96), hover_color=(46, 204, 113)))
-    dashboard.add_button(Button((btn_x + btn_w // 2 + 4, btn_start_y, btn_w // 2 - 4, btn_h), "Pause", on_pause, bg_color=(211, 84, 0), hover_color=(230, 126, 34)))
+    def set_panic() -> None:
+        engine.set_panic(PanicLevel.PANIC)
+        calm_btn.is_active = False
+        alert_btn.is_active = False
+        panic_btn.is_active = True
 
-    # Row 2: Resume & Reset
-    dashboard.add_button(Button((btn_x, btn_start_y + btn_h + gap, btn_w // 2 - 4, btn_h), "Resume", on_resume, bg_color=(41, 128, 185), hover_color=(52, 152, 219)))
-    dashboard.add_button(Button((btn_x + btn_w // 2 + 4, btn_start_y + btn_h + gap, btn_w // 2 - 4, btn_h), "Reset", on_reset, bg_color=(127, 140, 141), hover_color=(149, 165, 166)))
+    # Build Dashboard UI layout
+    btn_x = dash_x + 14
+    btn_w = dash_w - 28
+    btn_h = 26
+    gap = 6
+    btn_start_y = dashboard.rect.top + 280
 
-    # Row 3: Speed & New Seed
-    speed_btn = Button((btn_x, btn_start_y + (btn_h + gap) * 2, btn_w // 2 - 4, btn_h), f"Speed: {speed_levels[speed_idx]:.1f}x", on_cycle_speed, bg_color=(142, 68, 173), hover_color=(155, 89, 182))
-    dashboard.add_button(speed_btn)
-    dashboard.add_button(Button((btn_x + btn_w // 2 + 4, btn_start_y + (btn_h + gap) * 2, btn_w // 2 - 4, btn_h), "New Seed", on_new_seed, bg_color=(52, 73, 94), hover_color=(74, 105, 135)))
+    # Row 1: Mouse Tool Selection
+    t_w = (btn_w - gap * 2) // 3
+    tool_inspect_btn = Button((btn_x, btn_start_y, t_w, btn_h), "🔍 Inspect", set_tool_inspect, bg_color=(41, 128, 185))
+    tool_inspect_btn.is_active = True
+    tool_hazard_btn = Button((btn_x + t_w + gap, btn_start_y, t_w, btn_h), "🔥 Fire", set_tool_hazard, bg_color=(211, 84, 0))
+    tool_spawn_btn = Button((btn_x + (t_w + gap) * 2, btn_start_y, t_w, btn_h), "➕ Person", set_tool_spawn, bg_color=(39, 174, 96))
+    dashboard.add_button(tool_inspect_btn)
+    dashboard.add_button(tool_hazard_btn)
+    dashboard.add_button(tool_spawn_btn)
 
-    # Row 4: Mode Switcher (Normal Crowd Flow vs Evacuation)
-    mode_toggle_btn = Button((btn_x, btn_start_y + (btn_h + gap) * 3, btn_w, btn_h), "🚨 Trigger Evacuation", on_toggle_mode, bg_color=(192, 57, 43), hover_color=(231, 76, 60))
+    # Row 2: Panic Level Modulator
+    p_y = btn_start_y + btn_h + gap
+    calm_btn = Button((btn_x, p_y, t_w, btn_h), "😌 Calm", set_calm, bg_color=(46, 204, 113))
+    calm_btn.is_active = True
+    alert_btn = Button((btn_x + t_w + gap, p_y, t_w, btn_h), "🏃 Alert", set_alert, bg_color=(241, 196, 15), text_color=(20, 24, 32))
+    panic_btn = Button((btn_x + (t_w + gap) * 2, p_y, t_w, btn_h), "🚨 Panic", set_panic, bg_color=(231, 76, 60))
+    dashboard.add_button(calm_btn)
+    dashboard.add_button(alert_btn)
+    dashboard.add_button(panic_btn)
+
+    # Row 3: Mode Switcher & Heatmap Toggle
+    m_y = p_y + btn_h + gap
+    mode_toggle_btn = Button((btn_x, m_y, btn_w // 2 - 3, btn_h), "🚨 Trigger Evacuation", on_toggle_mode, bg_color=(192, 57, 43))
+    heatmap_btn = Button((btn_x + btn_w // 2 + 3, m_y, btn_w // 2 - 3, btn_h), "Heatmap: OFF", on_toggle_heatmap, bg_color=(52, 73, 94))
     dashboard.add_button(mode_toggle_btn)
+    dashboard.add_button(heatmap_btn)
 
-    # Row 5: Dynamic Exit Blocking
-    block_btn = Button((btn_x, btn_start_y + (btn_h + gap) * 4, btn_w, btn_h), "Block West Exit (Test Rerouting)", on_toggle_west_exit, bg_color=(211, 84, 0), hover_color=(230, 126, 34))
-    dashboard.add_button(block_btn)
+    # Row 4: Playback Controls (Start, Pause, Resume, Reset)
+    c_y = m_y + btn_h + gap
+    c_w = (btn_w - gap * 3) // 4
+    dashboard.add_button(Button((btn_x, c_y, c_w, btn_h), "Start", on_start, bg_color=(39, 174, 96)))
+    dashboard.add_button(Button((btn_x + c_w + gap, c_y, c_w, btn_h), "Pause", on_pause, bg_color=(211, 84, 0)))
+    dashboard.add_button(Button((btn_x + (c_w + gap) * 2, c_y, c_w, btn_h), "Resume", on_resume, bg_color=(41, 128, 185)))
+    dashboard.add_button(Button((btn_x + (c_w + gap) * 3, c_y, c_w, btn_h), "Reset", on_reset, bg_color=(127, 140, 141)))
 
-    font_banner = pygame.font.SysFont("Segoe UI", 20, bold=True)
-    font_subbanner = pygame.font.SysFont("Segoe UI", 12)
+    # Row 5: Speed & Respawn Seed
+    s_y = c_y + btn_h + gap
+    speed_btn = Button((btn_x, s_y, btn_w // 2 - 3, btn_h), f"Speed: {speed_levels[speed_idx]:.1f}x", on_cycle_speed, bg_color=(142, 68, 173))
+    dashboard.add_button(speed_btn)
+    dashboard.add_button(Button((btn_x + btn_w // 2 + 3, s_y, btn_w // 2 - 3, btn_h), "New Seed", on_new_seed, bg_color=(52, 73, 94)))
 
     accumulated_ms = 0.0
     running = True
 
     while running:
-        dt_ms = clock.tick(60)  # Render at smooth 60 FPS
+        dt_ms = clock.tick(60)
         accumulated_ms += dt_ms
 
         current_speed = speed_levels[speed_idx]
         effective_interval = base_tick_delay_ms / current_speed
 
+        # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -168,47 +210,80 @@ def create_simulation_app() -> None:
                         if engine.state == SimulationState.COMPLETED:
                             engine.reset()
                         engine.start()
+                elif event.key == pygame.K_m:
+                    on_toggle_mode()
+                elif event.key == pygame.K_h:
+                    on_toggle_heatmap()
                 elif event.key == pygame.K_r:
                     engine.reset()
                 elif event.key == pygame.K_n:
                     engine.restart_with_new_seed()
-                elif event.key == pygame.K_s:
-                    on_cycle_speed()
-                elif event.key == pygame.K_b:
-                    on_toggle_west_exit()
-                elif event.key == pygame.K_m:
-                    on_toggle_mode()
+                elif event.key == pygame.K_1:
+                    set_calm()
+                elif event.key == pygame.K_2:
+                    set_alert()
+                elif event.key == pygame.K_3:
+                    set_panic()
+
+            # Mouse interaction on Building floor plan
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                # Check if click falls within building floor
+                if (margin_left <= mx <= margin_left + grid_px_w and
+                    margin_top <= my <= margin_top + grid_px_h):
+                    gx, gy = renderer.pixel_to_grid(mx, my)
+
+                    if dashboard.active_tool == MouseTool.INSPECT:
+                        # Find closest person
+                        target_agent = engine.manager.find_agent_near(gx, gy, max_dist=1.2)
+                        engine.manager.selected_agent = target_agent
+                    elif dashboard.active_tool == MouseTool.PLACE_HAZARD:
+                        engine.add_hazard(int(gx), int(gy))
+                    elif dashboard.active_tool == MouseTool.SPAWN_PERSON:
+                        engine.spawn_agent_at(gx, gy)
+
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                # Right click on a hazard to remove it
+                mx, my = event.pos
+                if (margin_left <= mx <= margin_left + grid_px_w and
+                    margin_top <= my <= margin_top + grid_px_h):
+                    gx, gy = renderer.pixel_to_grid(mx, my)
+                    engine.remove_hazard(int(gx), int(gy))
 
             dashboard.handle_event(event)
 
-        # Discrete simulation tick step (decoupled from render FPS)
+        # Continuous physics integration
         while accumulated_ms >= effective_interval:
             accumulated_ms -= effective_interval
             if engine.state == SimulationState.RUNNING:
-                engine.step()
+                engine.step(dt=0.04)
 
-        # Render pass
-        screen.fill((18, 22, 30))
+        # Rendering
+        screen.fill((16, 20, 28))
 
-        # Title bar
-        title_font = pygame.font.SysFont("Segoe UI", 15, bold=True)
-        title_mode_desc = "Normal Pedestrian Circulation" if engine.crowd_mode == CrowdMode.NORMAL_FLOW else "Emergency Egress"
-        title_surf = title_font.render(
-            f"{building.name} — [{title_mode_desc}]", True, (220, 225, 235)
+        # Title
+        title_font = pygame.font.SysFont("Segoe UI", 14, bold=True)
+        mode_label = "Everyday Circulation" if engine.crowd_mode == CrowdMode.NORMAL_FLOW else "Emergency Egress"
+        screen.blit(
+            title_font.render(f"{building.name} — [{mode_label}]", True, (220, 225, 235)),
+            (margin_left, 12)
         )
-        screen.blit(title_surf, (margin_left, 12))
 
-        # Render building & all 4 exits
+        # Render building & exits
         renderer.render_building(screen, blocked_exits=engine.blocked_exits)
 
-        # Render crowd agents with continuous interpolation
+        # Optional density heatmap
+        renderer.render_density_heatmap(screen, engine.manager.agents)
+
+        # Render continuous agents & inspector reticle
         renderer.render_agents(
             screen,
             engine.manager.agents,
+            selected_agent=engine.manager.selected_agent,
             is_evacuation_mode=(engine.crowd_mode == CrowdMode.EVACUATION)
         )
 
-        # Render dashboard telemetry
+        # Render dashboard telemetry & inspector dossier
         summary = engine.get_summary()
         dashboard.render(
             surface=screen,
@@ -216,25 +291,9 @@ def create_simulation_app() -> None:
             state=engine.state,
             crowd_mode=engine.crowd_mode,
             sim_speed=current_speed,
-            is_west_exit_blocked=(0, 15) in engine.blocked_exits
+            selected_agent=engine.manager.selected_agent,
+            is_heatmap_active=renderer.show_heatmap
         )
-
-        # Evacuation completion banner
-        if engine.state == SimulationState.COMPLETED and engine.crowd_mode == CrowdMode.EVACUATION:
-            banner_rect = pygame.Rect(margin_left + 100, margin_top + grid_px_h // 2 - 50, grid_px_w - 200, 100)
-            pygame.draw.rect(screen, (30, 40, 50), banner_rect, border_radius=8)
-            pygame.draw.rect(screen, (46, 204, 113), banner_rect, width=2, border_radius=8)
-
-            txt1 = font_banner.render("EVACUATION COMPLETE", True, (46, 204, 113))
-            txt2 = font_subbanner.render(
-                f"Evacuated {summary.evacuated_agents}/{summary.total_agents} in {summary.total_ticks} ticks | Avg: {summary.avg_evacuation_ticks:.1f} ticks",
-                True, (230, 235, 240)
-            )
-            txt3 = font_subbanner.render("Press [R] to Reset or [M] for Normal Flow", True, (160, 175, 190))
-
-            screen.blit(txt1, txt1.get_rect(center=(banner_rect.centerx, banner_rect.top + 26)))
-            screen.blit(txt2, txt2.get_rect(center=(banner_rect.centerx, banner_rect.top + 54)))
-            screen.blit(txt3, txt3.get_rect(center=(banner_rect.centerx, banner_rect.top + 76)))
 
         pygame.display.flip()
 

@@ -1,12 +1,15 @@
-"""Building layout and architectural environment definition.
+"""Architectural building complex with realistic layout, pillars, and multiple exits.
 
-Defines rooms, corridors, walls, doorways, and multiple realistic building exits
-(North Plaza Exit, South Main Entrance, West Wing Exit, and East Wing Exit),
-ensuring all walkable areas have unobstructed connectivity to all exits.
+Models an expansive university student center and academic concourse:
+  - West Wing: Lecture Theater & Classrooms
+  - Central Atrium: Grand Concourse with architectural pillars & seating
+  - East Wing: Library & Study Lounge
+  - 4 Cardinal Exits: South Grand Entrance, North Plaza, West Courtyard, East Garden
+  - Dynamic interactive hazards (fire, smoke, temporary barriers)
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 from .grid import CellType, Grid
 
 
@@ -20,8 +23,8 @@ class Room:
     y2: int
     doorways: List[Tuple[int, int]] = field(default_factory=list)
 
-    def contains(self, x: int, y: int) -> bool:
-        """Check if an interior point (x, y) is inside this room."""
+    def contains(self, x: float, y: float) -> bool:
+        """Check if a coordinate (x, y) is inside this room."""
         return self.x1 <= x <= self.x2 and self.y1 <= y <= self.y2
 
     def get_interior_cells(self) -> List[Tuple[int, int]]:
@@ -34,95 +37,107 @@ class Room:
 
 
 class Building:
-    """Represents a structured building containing rooms, corridors, and exits."""
+    """Represents an architectural complex with rooms, pillars, and multiple exits."""
 
-    def __init__(self, grid: Grid, name: str = "University Complex") -> None:
+    def __init__(self, grid: Grid, name: str = "University Student Center & Concourse") -> None:
         self.grid: Grid = grid
         self.name: str = name
         self.rooms: Dict[str, Room] = {}
         self.exits: List[Tuple[int, int]] = []
+        self.pillars: Set[Tuple[int, int]] = set()
+        self.hazards: Set[Tuple[int, int]] = set()  # Dynamic fire/smoke hazard cells
 
     def add_room(self, room: Room) -> None:
-        """Register a room in the building."""
         self.rooms[room.name] = room
 
-    @classmethod
-    def create_default(cls, width: int = 30, height: int = 20) -> "Building":
-        """Construct a realistic university complex floor plan with 4 distinct exits.
+    def add_hazard(self, x: int, y: int) -> bool:
+        """Dynamically place a fire / hazard obstacle."""
+        if not self.grid.is_inside(x, y) or self.grid.is_wall(x, y):
+            return False
+        self.hazards.add((x, y))
+        self.grid.set_cell(x, y, CellType.WALL)
+        return True
 
-        Architecture:
-          - Dimensions: 30 columns x 20 rows.
-          - Perimeter: Solid exterior walls with 4 prominent exit portals.
-          - Room A (West Wing): cols 1..8, rows 2..11.
-          - Room B (Central Lecture Hall): cols 10..19, rows 2..11.
-          - Room C (East Wing): cols 21..28, rows 2..11.
-          - Main Concourse Corridor: cols 1..28, rows 13..18.
-          - Exits:
-              1. West Wing Exit: (0, 15), (0, 16)
-              2. East Wing Exit: (width - 1, 15), (width - 1, 16)
-              3. South Main Atrium Egress: (13, height - 1), (14, height - 1), (15, height - 1), (16, height - 1)
-              4. North Plaza Exit: (14, 0), (15, 0)
-        """
+    def remove_hazard(self, x: int, y: int) -> bool:
+        """Remove a hazard from the floor."""
+        if (x, y) in self.hazards:
+            self.hazards.remove((x, y))
+            self.grid.set_cell(x, y, CellType.FLOOR)
+            return True
+        return False
+
+    @classmethod
+    def create_default(cls, width: int = 34, height: int = 22) -> "Building":
+        """Construct a realistic campus complex with pillars, corridors, and 4 exits."""
         grid = Grid(width, height, default_cell=CellType.FLOOR)
 
-        # 1. Exterior Perimeter Walls
+        # 1. Perimeter Exterior Boundary
         grid.fill_rect(0, 0, width - 1, 0, CellType.WALL)
         grid.fill_rect(0, height - 1, width - 1, height - 1, CellType.WALL)
         grid.fill_rect(0, 0, 0, height - 1, CellType.WALL)
         grid.fill_rect(width - 1, 0, width - 1, height - 1, CellType.WALL)
 
-        # 2. Interior Dividing Walls
-        # Vertical wall separating Room A and Room B
-        grid.fill_rect(9, 1, 9, 12, CellType.WALL)
-        # Vertical wall separating Room B and Room C
-        grid.fill_rect(20, 1, 20, 12, CellType.WALL)
-        # Horizontal wall separating all rooms from concourse corridor
-        grid.fill_rect(1, 12, width - 2, 12, CellType.WALL)
+        # 2. Interior Walls
+        # Vertical wall separating West Wing and Central Atrium
+        grid.fill_rect(10, 1, 10, 13, CellType.WALL)
+        # Vertical wall separating Central Atrium and East Wing
+        grid.fill_rect(23, 1, 23, 13, CellType.WALL)
+        # Horizontal concourse divider
+        grid.fill_rect(1, 13, width - 2, 13, CellType.WALL)
 
-        # 3. Create Doorways (wide 2-cell openings for natural crowd flow)
-        room_a_doors = [(4, 12), (5, 12)]
-        room_b_doors = [(14, 12), (15, 12)]
-        room_c_doors = [(24, 12), (25, 12)]
+        # 3. Wide Architectural Doorways (2 cells wide for natural crowd flow)
+        room_a_doors = [(4, 13), (5, 13)]
+        room_b_doors = [(16, 13), (17, 13)]
+        room_c_doors = [(27, 13), (28, 13)]
 
         for dx, dy in room_a_doors + room_b_doors + room_c_doors:
             grid.set_cell(dx, dy, CellType.FLOOR)
 
-        # 4. Multiple Realistic Building Exits
-        # West Wing Exit (col 0)
-        west_exits = [(0, 15), (0, 16)]
-        # East Wing Exit (col 29)
-        east_exits = [(width - 1, 15), (width - 1, 16)]
-        # South Main Entrance / Egress (row height-1)
-        south_exits = [(13, height - 1), (14, height - 1), (15, height - 1), (16, height - 1)]
-        # North Plaza Exit (row 0, top of Room B)
-        north_exits = [(14, 0), (15, 0)]
+        # 4. Central Atrium Architectural Pillars (structural pillars people glide around!)
+        pillars = {
+            (14, 6), (19, 6),
+            (14, 17), (19, 17)
+        }
+        for px, py in pillars:
+            grid.set_cell(px, py, CellType.WALL)
+
+        # 5. Four Distinct, Prominent Exits across All Cardinal Directions
+        # West Wing Exit (West boundary, row 16-17)
+        west_exits = [(0, 16), (0, 17)]
+        # East Wing Exit (East boundary, row 16-17)
+        east_exits = [(width - 1, 16), (width - 1, 17)]
+        # South Grand Entrance / Egress (South boundary, 4 cells wide: cols 15..18)
+        south_exits = [(15, height - 1), (16, height - 1), (17, height - 1), (18, height - 1)]
+        # North Plaza Exit (North boundary, 2 cells wide: cols 16..17)
+        north_exits = [(16, 0), (17, 0)]
 
         all_exits = west_exits + east_exits + south_exits + north_exits
         for ex, ey in all_exits:
             grid.set_cell(ex, ey, CellType.EXIT)
 
-        # 5. Assemble Building and Room Metadata
-        building = cls(grid, name="University Academic & Student Center")
+        # 6. Metadata Registration
+        building = cls(grid, name="University Student Center & Concourse")
         building.exits = all_exits
+        building.pillars = pillars
 
         building.add_room(Room(
-            name="Room A (West Wing)",
-            x1=1, y1=1, x2=8, y2=11,
+            name="Room A (West Wing - Lecture Hall)",
+            x1=1, y1=1, x2=9, y2=12,
             doorways=room_a_doors
         ))
         building.add_room(Room(
-            name="Room B (Central Hall)",
-            x1=10, y1=1, x2=19, y2=11,
+            name="Room B (Central Atrium & Food Court)",
+            x1=11, y1=1, x2=22, y2=12,
             doorways=room_b_doors
         ))
         building.add_room(Room(
-            name="Room C (East Wing)",
-            x1=21, y1=1, x2=28, y2=11,
+            name="Room C (East Wing - Library & Study)",
+            x1=24, y1=1, x2=width - 2, y2=12,
             doorways=room_c_doors
         ))
         building.add_room(Room(
             name="Main Concourse Corridor",
-            x1=1, y1=13, x2=28, y2=18,
+            x1=1, y1=14, x2=width - 2, y2=height - 2,
             doorways=[]
         ))
 

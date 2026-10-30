@@ -1,17 +1,25 @@
-"""Interactive Dashboard and UI Control Panel for Pygame.
+"""Interactive Dashboard with Inspector Dossier, Tool Palette, and Panic Modulator.
 
-Renders real-time telemetry, mode status badges (Normal Flow vs Evacuation),
-progress meters, and interactive control buttons.
+Provides real-time telemetry, click-to-inspect occupant data,
+mouse interaction tools, and mode toggles.
 """
 
+from enum import Enum
 from typing import Callable, List, Optional, Tuple
 import pygame
 from evaluation.metrics import EvacuationSummary
 from simulation.engine import SimulationState, CrowdMode
+from agents.agent import Agent, PanicLevel
+
+
+class MouseTool(Enum):
+    INSPECT = "INSPECT"
+    PLACE_HAZARD = "PLACE_HAZARD"
+    SPAWN_PERSON = "SPAWN_PERSON"
 
 
 class Button:
-    """Clickable UI button with hover states and callbacks."""
+    """Clickable UI button with hover states and active highlights."""
 
     def __init__(
         self,
@@ -29,9 +37,9 @@ class Button:
         self.hover_color: Tuple[int, int, int] = hover_color
         self.text_color: Tuple[int, int, int] = text_color
         self.is_hovered: bool = False
+        self.is_active: bool = False
 
     def handle_event(self, event: pygame.event.Event) -> bool:
-        """Process mouse movement and click events."""
         if event.type == pygame.MOUSEMOTION:
             self.is_hovered = self.rect.collidepoint(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -41,22 +49,27 @@ class Button:
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
-        """Render button to surface."""
-        color = self.hover_color if self.is_hovered else self.bg_color
-        pygame.draw.rect(surface, color, self.rect, border_radius=6)
-        pygame.draw.rect(surface, (100, 120, 140), self.rect, width=1, border_radius=6)
+        if self.is_active:
+            color = (241, 196, 15)
+            txt_color = (20, 24, 32)
+        else:
+            color = self.hover_color if self.is_hovered else self.bg_color
+            txt_color = self.text_color
 
-        label = font.render(self.text, True, self.text_color)
-        label_rect = label.get_rect(center=self.rect.center)
-        surface.blit(label, label_rect)
+        pygame.draw.rect(surface, color, self.rect, border_radius=5)
+        pygame.draw.rect(surface, (90, 110, 130), self.rect, width=1, border_radius=5)
+
+        label = font.render(self.text, True, txt_color)
+        surface.blit(label, label.get_rect(center=self.rect.center))
 
 
 class Dashboard:
-    """Telemetry and Control Dashboard rendered on the side of the simulation view."""
+    """Telemetry, Inspector HUD, and Interactive Tool Palette."""
 
     def __init__(self, x: int, y: int, width: int, height: int) -> None:
         self.rect: pygame.Rect = pygame.Rect(x, y, width, height)
         self.buttons: List[Button] = []
+        self.active_tool: MouseTool = MouseTool.INSPECT
 
         self.font_title: Optional[pygame.font.Font] = None
         self.font_section: Optional[pygame.font.Font] = None
@@ -66,18 +79,16 @@ class Dashboard:
 
     def _init_fonts(self) -> None:
         if self.font_title is None:
-            self.font_title = pygame.font.SysFont("Segoe UI", 15, bold=True)
-            self.font_section = pygame.font.SysFont("Segoe UI", 12, bold=True)
-            self.font_body = pygame.font.SysFont("Segoe UI", 11)
-            self.font_bold = pygame.font.SysFont("Segoe UI", 11, bold=True)
-            self.font_btn = pygame.font.SysFont("Segoe UI", 11, bold=True)
+            self.font_title = pygame.font.SysFont("Segoe UI", 14, bold=True)
+            self.font_section = pygame.font.SysFont("Segoe UI", 11, bold=True)
+            self.font_body = pygame.font.SysFont("Segoe UI", 10)
+            self.font_bold = pygame.font.SysFont("Segoe UI", 10, bold=True)
+            self.font_btn = pygame.font.SysFont("Segoe UI", 10, bold=True)
 
     def add_button(self, button: Button) -> None:
-        """Register a button on the dashboard."""
         self.buttons.append(button)
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        """Dispatch event to all buttons."""
         for btn in self.buttons:
             btn.handle_event(event)
 
@@ -88,134 +99,121 @@ class Dashboard:
         state: SimulationState,
         crowd_mode: CrowdMode,
         sim_speed: float,
-        is_west_exit_blocked: bool
+        selected_agent: Optional[Agent],
+        is_heatmap_active: bool
     ) -> None:
-        """Render dashboard panels, metrics, progress bar, and buttons."""
         self._init_fonts()
 
         # Panel Background
-        pygame.draw.rect(surface, (28, 34, 46), self.rect)
-        pygame.draw.line(
-            surface, (45, 55, 70),
-            (self.rect.left, self.rect.top),
-            (self.rect.left, self.rect.bottom),
-            2
-        )
+        pygame.draw.rect(surface, (26, 32, 44), self.rect)
+        pygame.draw.line(surface, (45, 55, 72), (self.rect.left, self.rect.top), (self.rect.left, self.rect.bottom), 2)
 
-        pad_x = self.rect.left + 16
-        cur_y = self.rect.top + 14
+        pad_x = self.rect.left + 14
+        cur_y = self.rect.top + 12
 
         # Header Title
-        title_surf = self.font_title.render("CROWD SIMULATOR DASHBOARD", True, (240, 245, 250))
+        title_surf = self.font_title.render("SIMULATION CONTROL CENTER", True, (240, 245, 250))
         surface.blit(title_surf, (pad_x, cur_y))
-        cur_y += 24
+        cur_y += 22
 
-        # Mode Badge (Normal vs Evacuation)
+        # Mode Badge
         if crowd_mode == CrowdMode.NORMAL_FLOW:
-            mode_badge_bg = (39, 174, 96)
+            mode_color = (46, 204, 113)
             mode_text = "MODE: NORMAL CROWD FLOW"
         else:
-            mode_badge_bg = (192, 57, 43)
+            mode_color = (231, 76, 60)
             mode_text = "MODE: EMERGENCY EVACUATION"
 
-        mode_rect = pygame.Rect(pad_x, cur_y, self.rect.width - 32, 24)
-        pygame.draw.rect(surface, (20, 24, 32), mode_rect, border_radius=4)
-        pygame.draw.rect(surface, mode_badge_bg, mode_rect, width=2, border_radius=4)
-        mode_surf = self.font_bold.render(mode_text, True, mode_badge_bg)
-        surface.blit(mode_surf, mode_surf.get_rect(center=mode_rect.center))
-        cur_y += 30
+        mode_rect = pygame.Rect(pad_x, cur_y, self.rect.width - 28, 22)
+        pygame.draw.rect(surface, (18, 22, 30), mode_rect, border_radius=4)
+        pygame.draw.rect(surface, mode_color, mode_rect, width=2, border_radius=4)
+        m_lbl = self.font_bold.render(mode_text, True, mode_color)
+        surface.blit(m_lbl, m_lbl.get_rect(center=mode_rect.center))
+        cur_y += 26
 
-        # State Badge
-        state_colors = {
-            SimulationState.RUNNING: (46, 204, 113),
-            SimulationState.PAUSED: (241, 196, 15),
-            SimulationState.STOPPED: (149, 165, 166),
-            SimulationState.COMPLETED: (52, 152, 219),
-        }
-        badge_color = state_colors.get(state, (180, 180, 180))
-        badge_rect = pygame.Rect(pad_x, cur_y, self.rect.width - 32, 22)
-        pygame.draw.rect(surface, (20, 24, 32), badge_rect, border_radius=4)
-        pygame.draw.rect(surface, badge_color, badge_rect, width=1, border_radius=4)
+        # State & Tool status line
+        tool_text = f"TOOL: {self.active_tool.value} | {state.value} ({sim_speed:.1f}x)"
+        tool_lbl = self.font_bold.render(tool_text, True, (160, 180, 200))
+        surface.blit(tool_lbl, (pad_x, cur_y))
+        cur_y += 18
 
-        status_text = f"STATE: {state.value} | SPEED: {sim_speed:.1f}x"
-        status_surf = self.font_bold.render(status_text, True, badge_color)
-        surface.blit(status_surf, status_surf.get_rect(center=badge_rect.center))
-        cur_y += 28
+        # Occupant Dossier Card (if someone is clicked!)
+        cur_y = self._render_occupant_dossier(surface, pad_x, cur_y, selected_agent)
 
-        # In Evacuation Mode, show Progress Bar
-        if crowd_mode == CrowdMode.EVACUATION:
-            bar_card = pygame.Rect(pad_x, cur_y, self.rect.width - 32, 48)
-            pygame.draw.rect(surface, (22, 26, 35), bar_card, border_radius=6)
-
-            pct_label = self.font_bold.render(
-                f"Evac Progress: {summary.evacuation_percentage:.1f}%", True, (230, 235, 240)
-            )
-            surface.blit(pct_label, (bar_card.left + 10, bar_card.top + 6))
-
-            bar_track = pygame.Rect(bar_card.left + 10, bar_card.top + 26, bar_card.width - 20, 12)
-            pygame.draw.rect(surface, (45, 52, 65), bar_track, border_radius=4)
-
-            fill_width = int(bar_track.width * (summary.evacuation_percentage / 100.0))
-            if fill_width > 0:
-                fill_rect = pygame.Rect(bar_track.left, bar_track.top, fill_width, bar_track.height)
-                pygame.draw.rect(surface, (46, 204, 113), fill_rect, border_radius=4)
-
-            cur_y += 56
-        else:
-            # Normal Flow Card
-            info_card = pygame.Rect(pad_x, cur_y, self.rect.width - 32, 44)
-            pygame.draw.rect(surface, (22, 26, 35), info_card, border_radius=6)
-            info_title = self.font_bold.render("Pedestrian Dynamics Active", True, (46, 204, 113))
-            info_sub = self.font_body.render("Occupants navigating 4 exits & 3 rooms", True, (160, 175, 190))
-            surface.blit(info_title, (info_card.left + 10, info_card.top + 6))
-            surface.blit(info_sub, (info_card.left + 10, info_card.top + 24))
-            cur_y += 52
-
-        # Tabulated Metrics Grid
+        # Tabulated Metrics
         cur_y = self._render_metrics_grid(surface, pad_x, cur_y, summary, crowd_mode)
 
-        # Control Buttons
+        # Buttons
         for btn in self.buttons:
             btn.draw(surface, self.font_btn)
 
-    def _render_metrics_grid(
-        self,
-        surface: pygame.Surface,
-        x: int,
-        y: int,
-        summary: EvacuationSummary,
-        crowd_mode: CrowdMode
+    def _render_occupant_dossier(
+        self, surface: pygame.Surface, x: int, y: int, agent: Optional[Agent]
     ) -> int:
-        """Render metrics breakdown."""
+        """Render live telemetry dossier of the selected person."""
+        card_w = self.rect.width - 28
+        card_h = 74
+        card_rect = pygame.Rect(x, y, card_w, card_h)
+        pygame.draw.rect(surface, (20, 25, 35), card_rect, border_radius=6)
+        pygame.draw.rect(surface, (241, 196, 15) if agent else (40, 50, 65), card_rect, width=1, border_radius=6)
+
+        if agent is None:
+            txt1 = self.font_bold.render("Occupant Inspector (Click any person)", True, (120, 140, 160))
+            txt2 = self.font_body.render("Left-click on any person to view dossier", True, (80, 100, 120))
+            surface.blit(txt1, (x + 8, y + 16))
+            surface.blit(txt2, (x + 8, y + 36))
+            return card_rect.bottom + 10
+
+        # Person details
+        name_str = f"{agent.name} (ID #{agent.agent_id})"
+        group_str = f"Walking with Companion #{agent.companion_id}" if agent.companion_id else "Solo Pedestrian"
+        speed_str = f"Speed: {agent.vel.length():.2f} m/s ({agent.panic_level.value})"
+
+        surface.blit(self.font_bold.render(name_str, True, (241, 196, 15)), (x + 8, y + 6))
+        surface.blit(self.font_body.render(group_str, True, (180, 190, 200)), (x + 8, y + 24))
+        surface.blit(self.font_body.render(speed_str, True, (160, 210, 240)), (x + 8, y + 40))
+
+        # Stress meter
+        stress_pct = int(agent.stress_level * 100)
+        s_bar_track = pygame.Rect(x + 8, y + 58, card_w - 16, 8)
+        pygame.draw.rect(surface, (40, 50, 65), s_bar_track, border_radius=3)
+        s_fill_w = int(s_bar_track.width * agent.stress_level)
+        s_color = (46, 204, 113) if stress_pct < 40 else ((241, 196, 15) if stress_pct < 70 else (231, 76, 60))
+        if s_fill_w > 0:
+            pygame.draw.rect(surface, s_color, (s_bar_track.left, s_bar_track.top, s_fill_w, 8), border_radius=3)
+
+        return card_rect.bottom + 10
+
+    def _render_metrics_grid(
+        self, surface: pygame.Surface, x: int, y: int, summary: EvacuationSummary, crowd_mode: CrowdMode
+    ) -> int:
+        card_w = self.rect.width - 28
         if crowd_mode == CrowdMode.NORMAL_FLOW:
             metrics_data = [
-                ("Total Pedestrians", f"{summary.total_agents}", (220, 220, 220)),
-                ("Circulating Crowd", f"{summary.active_agents}", (46, 204, 113)),
-                ("Available Exits", "4 Distinct Portals", (52, 152, 219)),
+                ("Total Population", f"{summary.total_agents}", (220, 220, 220)),
+                ("Circulating Pedestrians", f"{summary.active_agents}", (46, 204, 113)),
+                ("Continuous Exits", "4 Portals Active", (52, 152, 219)),
                 ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
-                ("Congestion Delays", f"{summary.total_wait_ticks} wait-ticks", (230, 126, 34)),
+                ("Crowd Delay Ticks", f"{summary.total_wait_ticks}", (230, 126, 34)),
             ]
         else:
             metrics_data = [
                 ("Total Occupants", f"{summary.total_agents}", (220, 220, 220)),
-                ("Evacuated Safe", f"{summary.evacuated_agents}", (46, 204, 113)),
+                ("Evacuated Safe", f"{summary.evacuated_agents} ({summary.evacuation_percentage:.1f}%)", (46, 204, 113)),
                 ("Active In Building", f"{summary.active_agents}", (52, 152, 219)),
-                ("Stuck / Trapped", f"{summary.stuck_agents}", (231, 76, 60)),
                 ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
-                ("Avg Evac Time", f"{summary.avg_evacuation_ticks:.1f} ticks", (155, 89, 182)),
-                ("Congestion Delays", f"{summary.total_wait_ticks} wait-ticks", (230, 126, 34)),
+                ("Avg Egress Time", f"{summary.avg_evacuation_ticks:.1f} ticks", (155, 89, 182)),
             ]
 
-        card_rect = pygame.Rect(x, y, self.rect.width - 32, len(metrics_data) * 22 + 12)
-        pygame.draw.rect(surface, (22, 26, 35), card_rect, border_radius=6)
+        card_rect = pygame.Rect(x, y, card_w, len(metrics_data) * 20 + 8)
+        pygame.draw.rect(surface, (20, 25, 35), card_rect, border_radius=6)
 
-        line_y = y + 6
+        line_y = y + 5
         for label, val, color in metrics_data:
-            lbl_surf = self.font_body.render(label, True, (160, 170, 180))
+            lbl_surf = self.font_body.render(label, True, (150, 165, 180))
             val_surf = self.font_bold.render(val, True, color)
+            surface.blit(lbl_surf, (x + 8, line_y))
+            surface.blit(val_surf, (x + card_w - val_surf.get_width() - 8, line_y))
+            line_y += 20
 
-            surface.blit(lbl_surf, (x + 10, line_y))
-            surface.blit(val_surf, (x + card_rect.width - val_surf.get_width() - 10, line_y))
-            line_y += 22
-
-        return card_rect.bottom + 12
+        return card_rect.bottom + 10
