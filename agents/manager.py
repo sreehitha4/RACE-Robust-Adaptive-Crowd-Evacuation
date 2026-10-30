@@ -91,7 +91,8 @@ class AgentManager:
         chosen_positions = candidates[:count]
 
         for i, pos in enumerate(chosen_positions):
-            agent = Agent(agent_id=i + 1, start_pos=pos)
+            speed = round(rng.uniform(0.85, 1.20), 2)
+            agent = Agent(agent_id=i + 1, start_pos=pos, speed_factor=speed)
             self.agents.append(agent)
             self._agents_by_id[agent.agent_id] = agent
 

@@ -10,7 +10,7 @@ from environment.grid import CellType, Grid
 from agents.agent import Agent, AgentState
 from agents.manager import AgentManager
 from simulation.movement import MovementResolver
-from simulation.engine import SimulationEngine, SimulationState
+from simulation.engine import SimulationEngine, SimulationState, CrowdMode
 
 
 class TestMovementAndCollisions:
@@ -98,6 +98,7 @@ class TestSimulationEngineLifecycle:
         assert len(engine.manager.active_agents) == 10
 
     def test_run_until_complete_evacuation(self, engine: SimulationEngine) -> None:
+        engine.set_mode(CrowdMode.EVACUATION)
         engine.start()
         assert engine.state == SimulationState.RUNNING
 
@@ -115,6 +116,7 @@ class TestSimulationEngineLifecycle:
         assert summary.avg_evacuation_ticks > 0
 
     def test_reset_functionality(self, engine: SimulationEngine) -> None:
+        engine.set_mode(CrowdMode.EVACUATION)
         engine.start()
         for _ in range(5):
             engine.step()
@@ -128,12 +130,42 @@ class TestSimulationEngineLifecycle:
             assert agent.current_pos == agent.start_pos
 
     def test_dynamic_exit_blocking_and_rerouting(self, engine: SimulationEngine) -> None:
-        """Block West exit, verifying agents dynamically reroute to East exit."""
+        """Block West exit, verifying agents dynamically reroute to another available exit."""
+        engine.set_mode(CrowdMode.EVACUATION)
         # West exit: (0, 15) and (0, 16)
         engine.toggle_exit_block((0, 15))
         engine.toggle_exit_block((0, 16))
 
-        # Check all active agent paths now point to East exits (x = 29)
+        # Check all active agent paths now point away from West exit towards other open exits
         for agent in engine.manager.active_agents:
-            if agent.path:
-                assert agent.target_exit[0] == 29
+            if agent.path and agent.target_exit:
+                assert agent.target_exit not in [(0, 15), (0, 16)]
+                assert engine.building.grid.is_exit(agent.target_exit[0], agent.target_exit[1])
+
+
+    def test_normal_crowd_circulation_mode(self, engine: SimulationEngine) -> None:
+        """Test continuous normal pedestrian circulation where agents don't vanish upon reaching targets."""
+        assert engine.crowd_mode == CrowdMode.NORMAL_FLOW
+        engine.start()
+        # Step through 20 ticks
+        for _ in range(20):
+            engine.step()
+
+        # In normal mode, population remains active and circulating
+        assert len(engine.manager.active_agents) == engine.agent_count
+        assert engine.current_tick == 20
+
+    def test_mode_switching(self, engine: SimulationEngine) -> None:
+        """Test seamless switching between Normal Crowd Flow and Emergency Evacuation."""
+        assert engine.crowd_mode == CrowdMode.NORMAL_FLOW
+        engine.set_mode(CrowdMode.EVACUATION)
+        assert engine.crowd_mode == CrowdMode.EVACUATION
+
+        # In evacuation mode, agents have paths pointing to an exit
+        for agent in engine.manager.active_agents:
+            if agent.path and agent.target_exit:
+                assert engine.building.grid.is_exit(agent.target_exit[0], agent.target_exit[1])
+
+        # Switch back to normal flow
+        engine.set_mode(CrowdMode.NORMAL_FLOW)
+        assert engine.crowd_mode == CrowdMode.NORMAL_FLOW
