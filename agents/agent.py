@@ -76,7 +76,8 @@ class Agent:
         self.trail: List[Tuple[float, float]] = []
         self.max_trail_len: int = 8
 
-        # Metrics
+        # Metrics & Congestion Rerouting
+        self.rerouted: bool = False
         self.steps_taken: int = 0
         self.wait_ticks: int = 0
         self.evacuation_tick: Optional[int] = None

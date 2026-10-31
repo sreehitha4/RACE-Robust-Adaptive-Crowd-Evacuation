@@ -11,6 +11,7 @@ from agents.agent import Agent, AgentState
 from agents.manager import AgentManager
 from simulation.movement import MovementResolver
 from simulation.engine import SimulationEngine, SimulationState, CrowdMode
+from simulation.physics import Vector2
 
 
 class TestMovementAndCollisions:
@@ -201,3 +202,40 @@ class TestSimulationEngineLifecycle:
         assert engine.remove_hazard(*hazard_pos) is True
         assert hazard_pos not in engine.building.hazards
         assert engine.building.grid.is_walkable(*hazard_pos) is True
+
+
+    def test_dynamic_congestion_aware_exit_rerouting(self, engine: SimulationEngine) -> None:
+        """Verify that when an exit queue becomes congested, trailing agents divert to another exit."""
+        engine.set_mode(CrowdMode.EVACUATION)
+        engine.congestion_reroute_enabled = True
+
+        # Manually cluster 5 agents right outside West exit (0, 16)
+        west_exit = (0, 16)
+        for i in range(5):
+            agent = engine.manager.agents[i]
+            agent.pos = Vector2(1.5 + (i * 0.3), 16.5)
+            agent.target_exit = west_exit
+
+        # Place trailing agent in corridor at (10, 16) targeting West Exit
+        trailing_agent = engine.manager.agents[9]
+        trailing_agent.pos = Vector2(10.0, 16.5)
+        trailing_agent.target_exit = west_exit
+
+        initial_target = trailing_agent.target_exit
+        engine.check_congestion_rerouting()
+
+        # Due to heavy queue at West, trailing agent should evaluate alternatives (e.g. South or North)
+        # and reroute count should increment
+        assert engine.rerouted_count >= 1
+        assert trailing_agent.target_exit != initial_target
+        assert trailing_agent.rerouted is True
+
+    def test_cycle_unseen_floor_plans(self, engine: SimulationEngine) -> None:
+        """Verify cycling across all available floor plans resets state and re-populates correctly."""
+        initial_plan = engine.building.name
+        next_plan_type = engine.cycle_floor_plan()
+
+        assert engine.building.name != initial_plan
+        assert len(engine.manager.active_agents) == engine.agent_count
+        assert engine.current_tick == 0
+        assert engine.state == SimulationState.STOPPED

@@ -135,27 +135,46 @@ class BuildingRenderer:
             surface.blit(text_surf, text_rect)
 
     def _render_exit_signs(self, surface: pygame.Surface) -> None:
-        if self.font_exit is None:
+        if self.font_exit is None or not self.building.exits:
             return
 
         w = self.building.grid.width
         h = self.building.grid.height
 
-        # West Exit
-        w_px, w_py = self.grid_to_pixel(0, 16)
-        surface.blit(self.font_exit.render("⬅ EXIT 1 (WEST)", True, COLOR_EXIT), (w_px + 2, w_py - 14))
+        # Group adjacent exit cells into distinct exit clusters
+        clusters: List[List[Tuple[int, int]]] = []
+        for e in self.building.exits:
+            matched = False
+            for c in clusters:
+                if any(abs(e[0] - ce[0]) + abs(e[1] - ce[1]) <= 2 for ce in c):
+                    c.append(e)
+                    matched = True
+                    break
+            if not matched:
+                clusters.append([e])
 
-        # East Exit
-        e_px, e_py = self.grid_to_pixel(w - 1, 16)
-        surface.blit(self.font_exit.render("EXIT 2 (EAST) ➡", True, COLOR_EXIT), (e_px - 70, e_py - 14))
+        # Render an illuminated label for each cluster
+        for i, cluster in enumerate(clusters):
+            mid_x = sum(e[0] for e in cluster) / len(cluster)
+            mid_y = sum(e[1] for e in cluster) / len(cluster)
+            px, py = self.grid_to_pixel(mid_x, mid_y)
 
-        # South Main Egress
-        s_px, s_py = self.grid_to_pixel(15, h - 1)
-        surface.blit(self.font_exit.render("⬇ SOUTH MAIN ATRIUM EGRESS ⬇", True, COLOR_EXIT), (s_px - 45, s_py + self.cell_size + 2))
-
-        # North Plaza Exit
-        n_px, n_py = self.grid_to_pixel(16, 0)
-        surface.blit(self.font_exit.render("⬆ NORTH PLAZA EXIT ⬆", True, COLOR_EXIT), (n_px - 35, n_py - 16))
+            # Determine side
+            if any(e[0] == 0 for e in cluster):
+                text = f"⬅ EXIT {i+1}"
+                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px + 2, py - 14))
+            elif any(e[0] == w - 1 for e in cluster):
+                text = f"EXIT {i+1} ➡"
+                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 50, py - 14))
+            elif any(e[1] == 0 for e in cluster):
+                text = f"⬆ EXIT {i+1} ⬆"
+                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 25, py - 16))
+            elif any(e[1] == h - 1 for e in cluster):
+                text = f"⬇ EXIT {i+1} ⬇"
+                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 25, py + self.cell_size + 2))
+            else:
+                text = f"EXIT {i+1}"
+                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 15, py - 12))
 
     def render_agents(
         self,

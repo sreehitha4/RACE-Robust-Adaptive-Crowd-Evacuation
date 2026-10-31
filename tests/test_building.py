@@ -153,3 +153,34 @@ class TestBuildingLayout:
         assert len(unreachable_cells) == 0, (
             f"Found {len(unreachable_cells)} unreachable walkable cells: {unreachable_cells[:10]}"
         )
+
+
+    @pytest.mark.parametrize("plan_type", [
+        Building.FLOOR_PLAN_OFFICE,
+        Building.FLOOR_PLAN_TERMINAL,
+        Building.FLOOR_PLAN_PROCEDURAL
+    ])
+    def test_unseen_floor_plans_connectivity(self, plan_type: str) -> None:
+        """Verify that any unseen architectural layout has 100% exit connectivity."""
+        building = Building.create_by_plan(plan_type)
+        grid = building.grid
+        exits = grid.get_exits()
+        assert len(exits) >= 2
+
+        queue = deque(exits)
+        visited = set(exits)
+
+        while queue:
+            cx, cy = queue.popleft()
+            for nx, ny in grid.get_neighbors(cx, cy):
+                if (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    queue.append((nx, ny))
+
+        unreachable = []
+        for y in range(grid.height):
+            for x in range(grid.width):
+                if grid.is_walkable(x, y) and (x, y) not in visited:
+                    unreachable.append((x, y))
+
+        assert len(unreachable) == 0, f"Unseen plan '{plan_type}' has unreachable cells: {unreachable}"

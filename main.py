@@ -138,6 +138,18 @@ def create_simulation_app() -> None:
         alert_btn.is_active = False
         panic_btn.is_active = True
 
+    def on_cycle_floor_plan() -> None:
+        next_plan = engine.cycle_floor_plan()
+        renderer.building = engine.building
+        dashboard.graph.reset()
+        short_name = next_plan.split(" ")[0]
+        plan_btn.text = f"Map: {short_name}"
+
+    def on_toggle_balancing() -> None:
+        engine.congestion_reroute_enabled = not engine.congestion_reroute_enabled
+        balancing_btn.text = "Balancing: ON" if engine.congestion_reroute_enabled else "Balancing: OFF"
+        balancing_btn.bg_color = (46, 204, 113) if engine.congestion_reroute_enabled else (127, 140, 141)
+
     # Preset Benchmark Scenarios
     def load_scenario_standard() -> None:
         """Scenario 1: Standard Evacuation."""
@@ -242,6 +254,13 @@ def create_simulation_app() -> None:
     dashboard.add_button(speed_btn)
     dashboard.add_button(Button((btn_x + btn_w // 2 + 3, sp_y, btn_w // 2 - 3, btn_h), "New Seed", on_new_seed, bg_color=(52, 73, 94)))
 
+    # Row 7: Unseen Floor Plan & Congestion Balancing Toggles
+    f_y = sp_y + btn_h + gap
+    plan_btn = Button((btn_x, f_y, btn_w // 2 - 3, btn_h), "🏢 Cycle Map", on_cycle_floor_plan, bg_color=(41, 128, 185))
+    balancing_btn = Button((btn_x + btn_w // 2 + 3, f_y, btn_w // 2 - 3, btn_h), "⚖️ Balancing: ON", on_toggle_balancing, bg_color=(46, 204, 113))
+    dashboard.add_button(plan_btn)
+    dashboard.add_button(balancing_btn)
+
     accumulated_ms = 0.0
     running = True
 
@@ -276,6 +295,10 @@ def create_simulation_app() -> None:
                     on_reset()
                 elif event.key == pygame.K_n:
                     on_new_seed()
+                elif event.key == pygame.K_l:
+                    on_cycle_floor_plan()
+                elif event.key == pygame.K_c:
+                    on_toggle_balancing()
                 elif event.key == pygame.K_1:
                     set_calm()
                 elif event.key == pygame.K_2:
@@ -321,7 +344,7 @@ def create_simulation_app() -> None:
         title_font = pygame.font.SysFont("Segoe UI", 14, bold=True)
         mode_label = "Everyday Circulation" if engine.crowd_mode == CrowdMode.NORMAL_FLOW else "Emergency Egress"
         screen.blit(
-            title_font.render(f"{building.name} — [{mode_label}]", True, (220, 225, 235)),
+            title_font.render(f"{engine.building.name} — [{mode_label}]", True, (220, 225, 235)),
             (margin_left, 12)
         )
 
@@ -348,7 +371,10 @@ def create_simulation_app() -> None:
             crowd_mode=engine.crowd_mode,
             sim_speed=current_speed,
             selected_agent=engine.manager.selected_agent,
-            is_heatmap_active=renderer.show_heatmap
+            is_heatmap_active=renderer.show_heatmap,
+            plan_name=engine.building.name,
+            congestion_balancing_on=engine.congestion_reroute_enabled,
+            rerouted_count=engine.rerouted_count
         )
 
         pygame.display.flip()

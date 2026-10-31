@@ -104,7 +104,10 @@ class Dashboard:
         crowd_mode: CrowdMode,
         sim_speed: float,
         selected_agent: Optional[Agent],
-        is_heatmap_active: bool
+        is_heatmap_active: bool,
+        plan_name: str = "Campus Complex",
+        congestion_balancing_on: bool = True,
+        rerouted_count: int = 0
     ) -> None:
         self._init_fonts()
 
@@ -113,12 +116,12 @@ class Dashboard:
         pygame.draw.line(surface, (45, 55, 72), (self.rect.left, self.rect.top), (self.rect.left, self.rect.bottom), 2)
 
         pad_x = self.rect.left + 14
-        cur_y = self.rect.top + 10
+        cur_y = self.rect.top + 8
 
         # Title
         title_surf = self.font_title.render("SIMULATION CONTROL CENTER", True, (240, 245, 250))
         surface.blit(title_surf, (pad_x, cur_y))
-        cur_y += 20
+        cur_y += 18
 
         # Mode Badge
         if crowd_mode == CrowdMode.NORMAL_FLOW:
@@ -128,17 +131,17 @@ class Dashboard:
             mode_color = (231, 76, 60)
             mode_text = "MODE: EMERGENCY EVACUATION"
 
-        mode_rect = pygame.Rect(pad_x, cur_y, self.rect.width - 28, 20)
+        mode_rect = pygame.Rect(pad_x, cur_y, self.rect.width - 28, 18)
         pygame.draw.rect(surface, (16, 20, 28), mode_rect, border_radius=4)
         pygame.draw.rect(surface, mode_color, mode_rect, width=1, border_radius=4)
         m_lbl = self.font_bold.render(mode_text, True, mode_color)
         surface.blit(m_lbl, m_lbl.get_rect(center=mode_rect.center))
-        cur_y += 24
+        cur_y += 22
 
         # State & Tool status line
         status_line = f"STATE: {state.value} | TOOL: {self.active_tool.value} ({sim_speed:.1f}x)"
         surface.blit(self.font_bold.render(status_line, True, (150, 175, 200)), (pad_x, cur_y))
-        cur_y += 16
+        cur_y += 14
 
         # Occupant Dossier Card (if an agent is clicked)
         cur_y = self._render_occupant_dossier(surface, pad_x, cur_y, selected_agent)
@@ -147,10 +150,10 @@ class Dashboard:
         self.graph.rect.top = cur_y
         self.graph.record_datapoint(summary.total_ticks, summary.evacuated_agents)
         self.graph.draw(surface, total_agents=summary.total_agents)
-        cur_y = self.graph.rect.bottom + 8
+        cur_y = self.graph.rect.bottom + 6
 
         # Tabulated Metrics
-        cur_y = self._render_metrics_grid(surface, pad_x, cur_y, summary, crowd_mode)
+        cur_y = self._render_metrics_grid(surface, pad_x, cur_y, summary, crowd_mode, plan_name, congestion_balancing_on, rerouted_count)
 
         # Buttons
         for btn in self.buttons:
@@ -160,7 +163,7 @@ class Dashboard:
         self, surface: pygame.Surface, x: int, y: int, agent: Optional[Agent]
     ) -> int:
         card_w = self.rect.width - 28
-        card_h = 62
+        card_h = 60
         card_rect = pygame.Rect(x, y, card_w, card_h)
         pygame.draw.rect(surface, (18, 22, 32), card_rect, border_radius=5)
         pygame.draw.rect(surface, (241, 196, 15) if agent else (35, 45, 60), card_rect, width=1, border_radius=5)
@@ -168,49 +171,64 @@ class Dashboard:
         if agent is None:
             txt1 = self.font_bold.render("Occupant Inspector (Left-click any person)", True, (110, 130, 155))
             txt2 = self.font_body.render("Click a person to highlight their BFS path & stats", True, (80, 95, 115))
-            surface.blit(txt1, (x + 8, y + 14))
-            surface.blit(txt2, (x + 8, y + 32))
-            return card_rect.bottom + 8
+            surface.blit(txt1, (x + 8, y + 12))
+            surface.blit(txt2, (x + 8, y + 28))
+            return card_rect.bottom + 6
 
         name_str = f"{agent.name} (#{agent.agent_id}) — {agent.vel.length():.2f} m/s ({agent.panic_level.value})"
         group_str = f"Companion: #{agent.companion_id}" if agent.companion_id else "Solo Pedestrian"
+        if getattr(agent, "rerouted", False):
+            group_str += " | [REROUTED AROUND QUEUE]"
 
         surface.blit(self.font_bold.render(name_str, True, (241, 196, 15)), (x + 8, y + 5))
-        surface.blit(self.font_body.render(group_str, True, (170, 185, 200)), (x + 8, y + 21))
+        surface.blit(self.font_body.render(group_str, True, (170, 185, 200)), (x + 8, y + 20))
 
         # Stress meter
         stress_pct = int(agent.stress_level * 100)
-        s_bar_track = pygame.Rect(x + 8, y + 40, card_w - 16, 7)
+        s_bar_track = pygame.Rect(x + 8, y + 38, card_w - 16, 7)
         pygame.draw.rect(surface, (35, 45, 60), s_bar_track, border_radius=3)
         s_fill_w = int(s_bar_track.width * agent.stress_level)
         s_color = (46, 204, 113) if stress_pct < 40 else ((241, 196, 15) if stress_pct < 70 else (231, 76, 60))
         if s_fill_w > 0:
             pygame.draw.rect(surface, s_color, (s_bar_track.left, s_bar_track.top, s_fill_w, 7), border_radius=3)
 
-        return card_rect.bottom + 8
+        return card_rect.bottom + 6
 
     def _render_metrics_grid(
-        self, surface: pygame.Surface, x: int, y: int, summary: EvacuationSummary, crowd_mode: CrowdMode
+        self,
+        surface: pygame.Surface,
+        x: int,
+        y: int,
+        summary: EvacuationSummary,
+        crowd_mode: CrowdMode,
+        plan_name: str,
+        congestion_balancing_on: bool,
+        rerouted_count: int
     ) -> int:
         card_w = self.rect.width - 28
+        short_plan = plan_name.split(" ")[0] + " " + (plan_name.split(" ")[1] if len(plan_name.split(" ")) > 1 else "")
+        reroute_val = f"ACTIVE ({rerouted_count} diverted)" if congestion_balancing_on else "OFF (Fixed Paths)"
+        reroute_col = (46, 204, 113) if congestion_balancing_on else (145, 160, 175)
+
         if crowd_mode == CrowdMode.NORMAL_FLOW:
             metrics_data = [
-                ("Total Pedestrians", f"{summary.total_agents}", (220, 220, 220)),
-                ("Circulating Crowd", f"{summary.active_agents}", (46, 204, 113)),
-                ("Available Exits", "4 Portals Active", (52, 152, 219)),
+                ("Floor Plan", f"{short_plan}", (241, 196, 15)),
+                ("Exit Balancing", reroute_val, reroute_col),
+                ("Circulating Crowd", f"{summary.active_agents}/{summary.total_agents}", (46, 204, 113)),
                 ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
                 ("Crowd Delay Ticks", f"{summary.total_wait_ticks}", (230, 126, 34)),
             ]
         else:
             metrics_data = [
-                ("Total Population", f"{summary.total_agents}", (220, 220, 220)),
+                ("Floor Plan", f"{short_plan}", (241, 196, 15)),
+                ("Exit Balancing", reroute_val, reroute_col),
                 ("Evacuated Safe", f"{summary.evacuated_agents} ({summary.evacuation_percentage:.1f}%)", (46, 204, 113)),
                 ("Active In Building", f"{summary.active_agents}", (52, 152, 219)),
                 ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
                 ("Avg Egress Time", f"{summary.avg_evacuation_ticks:.1f} ticks", (155, 89, 182)),
             ]
 
-        card_rect = pygame.Rect(x, y, card_w, len(metrics_data) * 18 + 6)
+        card_rect = pygame.Rect(x, y, card_w, len(metrics_data) * 16 + 6)
         pygame.draw.rect(surface, (18, 22, 32), card_rect, border_radius=5)
 
         line_y = y + 4
@@ -219,6 +237,6 @@ class Dashboard:
             val_surf = self.font_bold.render(val, True, color)
             surface.blit(lbl_surf, (x + 8, line_y))
             surface.blit(val_surf, (x + card_w - val_surf.get_width() - 8, line_y))
-            line_y += 18
+            line_y += 16
 
-        return card_rect.bottom + 8
+        return card_rect.bottom + 6
