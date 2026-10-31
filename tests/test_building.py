@@ -184,3 +184,17 @@ class TestBuildingLayout:
                     unreachable.append((x, y))
 
         assert len(unreachable) == 0, f"Unseen plan '{plan_type}' has unreachable cells: {unreachable}"
+
+    def test_architectural_obstacles_placement(self, building: Building) -> None:
+        """Verify the 4 architectural obstacles (Kiosk, Bench, Planter, Desk) are registered and solid."""
+        assert len(building.obstacles) >= 4
+        obstacle_types = set(building.obstacles.values())
+        assert "KIOSK" in obstacle_types
+        assert "BENCH" in obstacle_types
+        assert "PLANTER" in obstacle_types
+        assert "DESK" in obstacle_types
+
+        # Verify that all obstacles act as solid walls
+        for (ox, oy), obs_type in building.obstacles.items():
+            assert building.grid.is_wall(ox, oy) is True
+            assert building.grid.is_walkable(ox, oy) is False

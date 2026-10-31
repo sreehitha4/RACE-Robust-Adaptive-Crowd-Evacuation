@@ -56,12 +56,14 @@ class BuildingRenderer:
         self.font_small: Optional[pygame.font.Font] = None
         self.font_room: Optional[pygame.font.Font] = None
         self.font_exit: Optional[pygame.font.Font] = None
+        self.font_badge: Optional[pygame.font.Font] = None
 
     def _init_fonts(self) -> None:
         if self.font_small is None:
             self.font_small = pygame.font.SysFont("Segoe UI", 9, bold=True)
             self.font_room = pygame.font.SysFont("Segoe UI", 11, bold=True)
-            self.font_exit = pygame.font.SysFont("Segoe UI", 10, bold=True)
+            self.font_exit = pygame.font.SysFont("Segoe UI", 8, bold=True)
+            self.font_badge = pygame.font.SysFont("Segoe UI", 7, bold=True)
 
     def grid_to_pixel(self, gx: float, gy: float) -> Tuple[int, int]:
         """Convert continuous grid coordinate to screen pixel coordinate."""
@@ -75,8 +77,45 @@ class BuildingRenderer:
         gy = (py - self.offset_y) / self.cell_size
         return gx, gy
 
-    def render_building(self, surface: pygame.Surface, blocked_exits: Optional[Set[Tuple[int, int]]] = None) -> None:
-        """Render floor plan, architectural rooms, doorway arcs, pillars, and 4 exits."""
+    def _render_obstacle(self, surface: pygame.Surface, rect: pygame.Rect, obs_type: str) -> None:
+        """Render distinct architectural obstacles (Kiosk, Bench, Planter, Desk)."""
+        if obs_type == "KIOSK":
+            # Information Kiosk (Rich Mahogany Counter)
+            pygame.draw.rect(surface, (140, 75, 40), rect, border_radius=4)
+            pygame.draw.rect(surface, (185, 115, 75), rect.inflate(-4, -4), border_radius=3)
+            if self.font_badge:
+                lbl = self.font_badge.render("INFO", True, (255, 255, 255))
+                surface.blit(lbl, lbl.get_rect(center=rect.center))
+        elif obs_type == "BENCH":
+            # Concourse Seating Bench (Cedar slats with metal braces)
+            pygame.draw.rect(surface, (235, 238, 242), rect)
+            pygame.draw.rect(surface, (45, 52, 60), rect, width=1, border_radius=2)
+            slat_h = max(2, rect.height // 5)
+            for s in range(3):
+                slat_rect = pygame.Rect(rect.left + 2, rect.top + 3 + (s * (slat_h + 2)), rect.width - 4, slat_h)
+                pygame.draw.rect(surface, (190, 135, 80), slat_rect, border_radius=1)
+        elif obs_type == "PLANTER":
+            # Lush Green Architectural Planter Box
+            pygame.draw.rect(surface, (80, 70, 60), rect, border_radius=3)
+            pygame.draw.circle(surface, (46, 139, 87), rect.center, int(self.cell_size * 0.42))
+            pygame.draw.circle(surface, (76, 175, 80), (rect.centerx - 2, rect.centery - 2), int(self.cell_size * 0.25))
+            pygame.draw.circle(surface, (34, 110, 68), (rect.centerx + 3, rect.centery + 3), int(self.cell_size * 0.20))
+        elif obs_type == "DESK":
+            # Lecture / Office Desk Workstation
+            pygame.draw.rect(surface, (70, 90, 115), rect, border_radius=2)
+            pygame.draw.rect(surface, (110, 135, 165), rect.inflate(-4, -4), border_radius=2)
+            m_rect = pygame.Rect(rect.centerx - 4, rect.centery - 2, 8, 4)
+            pygame.draw.rect(surface, (30, 40, 55), m_rect)
+        else:
+            pygame.draw.rect(surface, (120, 120, 120), rect)
+
+    def render_building(
+        self,
+        surface: pygame.Surface,
+        blocked_exits: Optional[Set[Tuple[int, int]]] = None,
+        exit_queues: Optional[Dict[Tuple[int, int], int]] = None
+    ) -> None:
+        """Render floor plan, architectural rooms, doorway arcs, obstacles, pillars, and 4 exits."""
         self._init_fonts()
         grid = self.building.grid
         blocked = blocked_exits or set()
@@ -97,6 +136,10 @@ class BuildingRenderer:
                     pygame.draw.rect(surface, (231, 76, 60), rect)
                     pygame.draw.circle(surface, (243, 156, 18), rect.center, int(self.cell_size * 0.42))
                     pygame.draw.circle(surface, (255, 240, 180), rect.center, int(self.cell_size * 0.22))
+                elif (gx, gy) in self.building.obstacles:
+                    # Architectural obstacles (Kiosk, Bench, Planter, Desk)
+                    obs_type = self.building.obstacles[(gx, gy)]
+                    self._render_obstacle(surface, rect, obs_type)
                 elif (gx, gy) in self.building.pillars:
                     # Structural architectural pillar
                     pygame.draw.rect(surface, (240, 243, 248), rect)
@@ -120,7 +163,8 @@ class BuildingRenderer:
                         pygame.draw.rect(surface, COLOR_DOOR_FRAME, (px, py + self.cell_size - 3, self.cell_size, 3))
 
         self._render_room_labels(surface)
-        self._render_exit_signs(surface)
+        self._render_exit_signs(surface, exit_queues)
+        self._render_obstacle_legend(surface)
 
     def _render_room_labels(self, surface: pygame.Surface) -> None:
         if self.font_room is None:
@@ -134,7 +178,9 @@ class BuildingRenderer:
             text_rect = text_surf.get_rect(center=(int(rx), int(ry)))
             surface.blit(text_surf, text_rect)
 
-    def _render_exit_signs(self, surface: pygame.Surface) -> None:
+    def _render_exit_signs(
+        self, surface: pygame.Surface, exit_queues: Optional[Dict[Tuple[int, int], int]] = None
+    ) -> None:
         if self.font_exit is None or not self.building.exits:
             return
 
@@ -153,28 +199,77 @@ class BuildingRenderer:
             if not matched:
                 clusters.append([e])
 
-        # Render an illuminated label for each cluster
+        # Render an illuminated label + real-time queue badge for each cluster
         for i, cluster in enumerate(clusters):
             mid_x = sum(e[0] for e in cluster) / len(cluster)
             mid_y = sum(e[1] for e in cluster) / len(cluster)
             px, py = self.grid_to_pixel(mid_x, mid_y)
 
-            # Determine side
-            if any(e[0] == 0 for e in cluster):
-                text = f"⬅ EXIT {i+1}"
-                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px + 2, py - 14))
-            elif any(e[0] == w - 1 for e in cluster):
-                text = f"EXIT {i+1} ➡"
-                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 50, py - 14))
-            elif any(e[1] == 0 for e in cluster):
-                text = f"⬆ EXIT {i+1} ⬆"
-                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 25, py - 16))
-            elif any(e[1] == h - 1 for e in cluster):
-                text = f"⬇ EXIT {i+1} ⬇"
-                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 25, py + self.cell_size + 2))
+            q_count = max((exit_queues.get(cell, 0) for cell in cluster), default=0) if exit_queues else 0
+            if q_count == 0:
+                q_status = "CLEAR"
+                q_col = (39, 174, 96)
+            elif q_count == 1:
+                q_status = "MODERATE"
+                q_col = (241, 196, 15)
             else:
-                text = f"EXIT {i+1}"
-                surface.blit(self.font_exit.render(text, True, COLOR_EXIT), (px - 15, py - 12))
+                q_status = "JAMMED!"
+                q_col = (231, 76, 60)
+
+            badge_text = f"EXIT {i+1} [Q:{q_count} {q_status}]"
+            lbl_surf = self.font_exit.render(badge_text, True, (255, 255, 255))
+            bw = lbl_surf.get_width() + 8
+            bh = lbl_surf.get_height() + 4
+
+            # Determine side & coordinate offset
+            if any(e[0] == 0 for e in cluster):
+                bx = px + 4
+                by = py - bh // 2
+            elif any(e[0] == w - 1 for e in cluster):
+                bx = px - bw - 4
+                by = py - bh // 2
+            elif any(e[1] == 0 for e in cluster):
+                bx = px - bw // 2
+                by = py - bh - 2
+            elif any(e[1] == h - 1 for e in cluster):
+                bx = px - bw // 2
+                by = py + self.cell_size + 2
+            else:
+                bx = px - bw // 2
+                by = py - bh - 2
+
+            b_rect = pygame.Rect(bx, by, bw, bh)
+            pygame.draw.rect(surface, (18, 22, 32), b_rect, border_radius=3)
+            pygame.draw.rect(surface, q_col, b_rect, width=1, border_radius=3)
+            surface.blit(lbl_surf, (bx + 4, by + 2))
+
+    def _render_obstacle_legend(self, surface: pygame.Surface) -> None:
+        """Render a small architectural obstacle reference banner."""
+        if not self.font_badge or not self.building.obstacles:
+            return
+
+        lx = self.offset_x + 6
+        ly = self.offset_y + self.grid_pixel_height + 6
+        legend_items = [
+            ("KIOSK", (140, 75, 40), "Info Kiosk"),
+            ("BENCH", (190, 135, 80), "Cedar Bench"),
+            ("PLANTER", (46, 139, 87), "Green Planter"),
+            ("DESK", (70, 90, 115), "Lecture Desk"),
+        ]
+
+        # Header tag
+        hdr = self.font_badge.render("ARCHITECTURAL OBSTACLES:", True, (130, 150, 175))
+        surface.blit(hdr, (lx, ly + 2))
+        cur_x = lx + hdr.get_width() + 10
+
+        for key, col, name in legend_items:
+            # Color swatch
+            swatch_rect = pygame.Rect(cur_x, ly + 2, 10, 10)
+            pygame.draw.rect(surface, col, swatch_rect, border_radius=2)
+            cur_x += 14
+            txt = self.font_badge.render(name, True, (180, 195, 210))
+            surface.blit(txt, (cur_x, ly + 1))
+            cur_x += txt.get_width() + 12
 
     def render_agents(
         self,
@@ -239,6 +334,13 @@ class BuildingRenderer:
             if self.font_small:
                 id_text = self.font_small.render(str(agent.agent_id), True, (255, 255, 255))
                 surface.blit(id_text, id_text.get_rect(center=(cx, cy)))
+
+            # Congestion-Aware Diverter Badge & Halo
+            if getattr(agent, "rerouted", False):
+                pygame.draw.circle(surface, (255, 215, 0), (cx, cy), radius + 4, width=2)
+                if self.font_badge:
+                    d_surf = self.font_badge.render("⚡ DIVERTER", True, (255, 215, 0))
+                    surface.blit(d_surf, (cx - d_surf.get_width() // 2, cy - radius - 11))
 
         # 3. Selected Agent Reticle & Projected Navigation Line
         if selected_agent and selected_agent.is_active:

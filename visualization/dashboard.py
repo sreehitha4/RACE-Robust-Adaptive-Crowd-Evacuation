@@ -5,7 +5,7 @@ and panic level modulation.
 """
 
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import pygame
 from evaluation.metrics import EvacuationSummary
 from simulation.engine import SimulationState, CrowdMode
@@ -107,7 +107,8 @@ class Dashboard:
         is_heatmap_active: bool,
         plan_name: str = "Campus Complex",
         congestion_balancing_on: bool = True,
-        rerouted_count: int = 0
+        rerouted_count: int = 0,
+        portal_queues: Optional[Dict[int, int]] = None
     ) -> None:
         self._init_fonts()
 
@@ -153,7 +154,10 @@ class Dashboard:
         cur_y = self.graph.rect.bottom + 6
 
         # Tabulated Metrics
-        cur_y = self._render_metrics_grid(surface, pad_x, cur_y, summary, crowd_mode, plan_name, congestion_balancing_on, rerouted_count)
+        cur_y = self._render_metrics_grid(
+            surface, pad_x, cur_y, summary, crowd_mode, plan_name,
+            congestion_balancing_on, rerouted_count, portal_queues
+        )
 
         # Buttons
         for btn in self.buttons:
@@ -203,28 +207,38 @@ class Dashboard:
         crowd_mode: CrowdMode,
         plan_name: str,
         congestion_balancing_on: bool,
-        rerouted_count: int
+        rerouted_count: int,
+        portal_queues: Optional[Dict[int, int]] = None
     ) -> int:
         card_w = self.rect.width - 28
         short_plan = plan_name.split(" ")[0] + " " + (plan_name.split(" ")[1] if len(plan_name.split(" ")) > 1 else "")
         reroute_val = f"ACTIVE ({rerouted_count} diverted)" if congestion_balancing_on else "OFF (Fixed Paths)"
         reroute_col = (46, 204, 113) if congestion_balancing_on else (145, 160, 175)
 
+        if portal_queues:
+            q_parts = [f"E{idx+1}:{cnt}" for idx, cnt in sorted(portal_queues.items())[:4]]
+            q_summary = "  ".join(q_parts)
+            has_jam = any(v >= 2 for v in portal_queues.values())
+            q_color = (231, 76, 60) if has_jam else (46, 204, 113)
+        else:
+            q_summary = "All Clear"
+            q_color = (46, 204, 113)
+
         if crowd_mode == CrowdMode.NORMAL_FLOW:
             metrics_data = [
                 ("Floor Plan", f"{short_plan}", (241, 196, 15)),
                 ("Exit Balancing", reroute_val, reroute_col),
+                ("Portal Queues", q_summary, q_color),
                 ("Circulating Crowd", f"{summary.active_agents}/{summary.total_agents}", (46, 204, 113)),
                 ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
-                ("Crowd Delay Ticks", f"{summary.total_wait_ticks}", (230, 126, 34)),
             ]
         else:
             metrics_data = [
                 ("Floor Plan", f"{short_plan}", (241, 196, 15)),
                 ("Exit Balancing", reroute_val, reroute_col),
+                ("Portal Queues", q_summary, q_color),
                 ("Evacuated Safe", f"{summary.evacuated_agents} ({summary.evacuation_percentage:.1f}%)", (46, 204, 113)),
                 ("Active In Building", f"{summary.active_agents}", (52, 152, 219)),
-                ("Simulation Ticks", f"{summary.total_ticks}", (241, 196, 15)),
                 ("Avg Egress Time", f"{summary.avg_evacuation_ticks:.1f} ticks", (155, 89, 182)),
             ]
 

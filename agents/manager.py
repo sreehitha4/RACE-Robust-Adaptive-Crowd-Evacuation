@@ -44,6 +44,10 @@ class AgentManager:
     def get_agent(self, agent_id: int) -> Optional[Agent]:
         return self._agents_by_id.get(agent_id)
 
+    def add_agent(self, agent: Agent) -> None:
+        self.agents.append(agent)
+        self._agents_by_id[agent.agent_id] = agent
+
     def clear(self) -> None:
         self.agents.clear()
         self._agents_by_id.clear()

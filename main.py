@@ -35,7 +35,7 @@ def create_simulation_app() -> None:
     dash_x = margin_left + grid_px_w + 20
     dash_w = 340
     window_w = dash_x + dash_w + 20
-    window_h = max(grid_px_h + margin_top + 50, 700)
+    window_h = max(grid_px_h + margin_top + 60, 720)
 
     screen = pygame.display.set_mode((window_w, window_h))
     pygame.display.set_caption("2D Continuous Crowd Simulator — Social Force Model & BFS")
@@ -196,6 +196,13 @@ def create_simulation_app() -> None:
         mode_toggle_btn.bg_color = (39, 174, 96)
         engine.start()
 
+    def load_scenario_dynamic_balancing() -> None:
+        """Scenario 5: Dynamic Congestion-Aware Exit Balancing Demo."""
+        dashboard.graph.reset()
+        engine.load_scenario_congestion_demo()
+        mode_toggle_btn.text = "🏢 Normal Crowd Flow"
+        mode_toggle_btn.bg_color = (39, 174, 96)
+
     # Build Dashboard UI layout
     btn_x = dash_x + 14
     btn_w = dash_w - 28
@@ -233,8 +240,11 @@ def create_simulation_app() -> None:
     dashboard.add_button(Button((btn_x, s_y2, sc_w, btn_h), "🚶 Scenario 3: Flow", load_scenario_normal_flow, bg_color=(39, 174, 96)))
     dashboard.add_button(Button((btn_x + sc_w + gap, s_y2, sc_w, btn_h), "👥 Scenario 4: Density", load_scenario_high_density, bg_color=(142, 68, 173)))
 
+    s_y3 = s_y2 + btn_h + gap
+    dashboard.add_button(Button((btn_x, s_y3, btn_w, btn_h), "⚖️ Scenario 5: Demo Balancing", load_scenario_dynamic_balancing, bg_color=(230, 126, 34)))
+
     # Row 4: Mode Switcher & Heatmap Toggle
-    m_y = s_y2 + btn_h + gap
+    m_y = s_y3 + btn_h + gap
     mode_toggle_btn = Button((btn_x, m_y, btn_w // 2 - 3, btn_h), "🚨 Trigger Evacuation", on_toggle_mode, bg_color=(192, 57, 43))
     heatmap_btn = Button((btn_x + btn_w // 2 + 3, m_y, btn_w // 2 - 3, btn_h), "Heatmap: OFF", on_toggle_heatmap, bg_color=(52, 73, 94))
     dashboard.add_button(mode_toggle_btn)
@@ -299,6 +309,8 @@ def create_simulation_app() -> None:
                     on_cycle_floor_plan()
                 elif event.key == pygame.K_c:
                     on_toggle_balancing()
+                elif event.key == pygame.K_b:
+                    load_scenario_dynamic_balancing()
                 elif event.key == pygame.K_1:
                     set_calm()
                 elif event.key == pygame.K_2:
@@ -348,8 +360,8 @@ def create_simulation_app() -> None:
             (margin_left, 12)
         )
 
-        # Render building & exits
-        renderer.render_building(screen, blocked_exits=engine.blocked_exits)
+        # Render building, obstacles & real-time exit queue badges
+        renderer.render_building(screen, blocked_exits=engine.blocked_exits, exit_queues=engine.exit_queues)
 
         # Optional density heatmap
         renderer.render_density_heatmap(screen, engine.manager.agents)
@@ -374,7 +386,8 @@ def create_simulation_app() -> None:
             is_heatmap_active=renderer.show_heatmap,
             plan_name=engine.building.name,
             congestion_balancing_on=engine.congestion_reroute_enabled,
-            rerouted_count=engine.rerouted_count
+            rerouted_count=engine.rerouted_count,
+            portal_queues=engine.portal_queues
         )
 
         pygame.display.flip()

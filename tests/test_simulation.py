@@ -239,3 +239,18 @@ class TestSimulationEngineLifecycle:
         assert len(engine.manager.active_agents) == engine.agent_count
         assert engine.current_tick == 0
         assert engine.state == SimulationState.STOPPED
+
+    def test_load_scenario_congestion_demo(self, engine: SimulationEngine) -> None:
+        """Verify Scenario 5 spawns clustered agents and triggers dynamic exit balancing."""
+        engine.load_scenario_congestion_demo()
+        assert len(engine.manager.active_agents) == 20
+        assert engine.crowd_mode == CrowdMode.EVACUATION
+        assert engine.state == SimulationState.RUNNING
+
+        # Step simulation several ticks to allow bottleneck queue to trigger dynamic rerouting
+        for _ in range(25):
+            engine.step(dt=0.04)
+
+        # Dynamic exit balancing must trigger
+        assert engine.rerouted_count >= 1
+        assert any(a.rerouted for a in engine.manager.active_agents)

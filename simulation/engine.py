@@ -56,10 +56,12 @@ class SimulationEngine:
         self.congestion_reroute_enabled: bool = True
         self.rerouted_count: int = 0
         self.exit_queues: Dict[Tuple[int, int], int] = {}
+        self.portal_queues: Dict[int, int] = {}
 
         # Initial spawn with social group pairs
         self.manager.spawn_agents(count=agent_count, seed=seed)
         self.setup_agent_routes()
+        self.update_exit_queues()
 
     def set_mode(self, mode: CrowdMode) -> None:
         """Switch between Normal Everyday Crowd Flow and Emergency Evacuation."""
@@ -127,25 +129,12 @@ class SimulationEngine:
             else:
                 agent.mark_stuck(reason="No accessible exit found")
 
-    def check_congestion_rerouting(self) -> None:
-        """Detect exit congestion bottlenecks and dynamically reroute trailing crowd members
-        to less congested nearby exits.
-        """
-        if not self.congestion_reroute_enabled or self.crowd_mode != CrowdMode.EVACUATION:
-            return
-
-        active_agents = self.manager.active_agents
-        if not active_agents:
-            return
-
-        # 1. Group individual exit cells into distinct exit portals
+    def get_exit_portals(self) -> List[List[Tuple[int, int]]]:
+        """Group contiguous exit cells into distinct exit portals."""
         active_exits = [
             e for e in self.building.grid.get_exits()
             if e not in self.blocked_exits and self.building.grid.is_walkable(e[0], e[1])
         ]
-        if len(active_exits) <= 1:
-            return
-
         portals: List[List[Tuple[int, int]]] = []
         for e in active_exits:
             matched = False
@@ -156,9 +145,14 @@ class SimulationEngine:
                     break
             if not matched:
                 portals.append([e])
+        return portals
 
-        # 2. Count crowd queue at each portal (agents targeting or within 4.5m)
+    def update_exit_queues(self) -> None:
+        """Update real-time queue metrics across all active exit portals."""
+        portals = self.get_exit_portals()
         portal_queues: Dict[int, int] = {idx: 0 for idx in range(len(portals))}
+        active_agents = self.manager.active_agents
+
         for agent in active_agents:
             for p_idx, portal in enumerate(portals):
                 is_targeting = agent.target_exit in portal
@@ -166,9 +160,29 @@ class SimulationEngine:
                 if is_targeting or near_portal:
                     portal_queues[p_idx] += 1
 
-        self.exit_queues = {tuple(p[0]): portal_queues[idx] for idx, p in enumerate(portals)}
+        # Populate exit_queues for EVERY individual exit cell
+        self.exit_queues = {}
+        for idx, p in enumerate(portals):
+            for cell in p:
+                self.exit_queues[cell] = portal_queues[idx]
+        self.portal_queues = portal_queues
 
-        # 3. Trailing agents evaluate if alternative exits are faster
+    def check_congestion_rerouting(self) -> None:
+        """Detect exit bottlenecks and dynamically reroute trailing crowd members
+        to less congested nearby exits.
+        """
+        self.update_exit_queues()
+        if not self.congestion_reroute_enabled or self.crowd_mode != CrowdMode.EVACUATION:
+            return
+
+        active_agents = self.manager.active_agents
+        if not active_agents:
+            return
+
+        portals = self.get_exit_portals()
+        if len(portals) <= 1:
+            return
+
         grid = self.building.grid
         for agent in active_agents:
             cur_target = agent.target_exit
@@ -179,17 +193,17 @@ class SimulationEngine:
             if cur_p_idx is None:
                 continue
 
-            cur_queue = portal_queues[cur_p_idx]
-            if cur_queue < 3:
-                continue  # No significant bottleneck at this exit
+            cur_queue = self.portal_queues.get(cur_p_idx, 0)
+            if cur_queue < 2:
+                continue  # No bottleneck at this portal
 
             dist_to_cur = agent.pos.distance_to(Vector2(cur_target[0] + 0.5, cur_target[1] + 0.5))
-            if dist_to_cur < 3.2:
-                continue  # Already close to portal, do not turn back
+            if dist_to_cur < 2.5:
+                continue  # Already about to step through portal, do not turn around
 
-            cost_cur = dist_to_cur + (cur_queue * 1.5)
+            # Delay cost model: travel distance + doorway queue wait time
+            cost_cur = dist_to_cur + (cur_queue * 2.2)
 
-            # Evaluate alternative portals
             best_alt_portal = None
             best_alt_cost = cost_cur
             best_alt_path = None
@@ -197,13 +211,13 @@ class SimulationEngine:
             for alt_idx, alt_p in enumerate(portals):
                 if alt_idx == cur_p_idx:
                     continue
-                alt_queue = portal_queues[alt_idx]
+                alt_queue = self.portal_queues.get(alt_idx, 0)
                 alt_target = alt_p[0]
                 dist_to_alt = agent.pos.distance_to(Vector2(alt_target[0] + 0.5, alt_target[1] + 0.5))
-                cost_alt = dist_to_alt + (alt_queue * 1.5)
+                cost_alt = dist_to_alt + (alt_queue * 2.2)
 
-                # Must be substantially better (by at least 3.5 units) to prevent oscillation
-                if cost_alt + 3.5 < best_alt_cost:
+                # Reroute if alternate exit offers noticeably faster overall egress
+                if cost_alt + 1.2 < best_alt_cost:
                     path = bfs_shortest_path(grid, agent.current_pos, alt_p)
                     if path and len(path) > 1:
                         best_alt_cost = cost_alt
@@ -214,9 +228,9 @@ class SimulationEngine:
                 agent.set_path(best_alt_path, target_exit=best_alt_path[-1])
                 agent.rerouted = True
                 self.rerouted_count += 1
-                portal_queues[cur_p_idx] -= 1
+                self.portal_queues[cur_p_idx] = max(0, self.portal_queues[cur_p_idx] - 1)
                 new_idx = next(idx for idx, p in enumerate(portals) if p == best_alt_portal)
-                portal_queues[new_idx] += 1
+                self.portal_queues[new_idx] = self.portal_queues.get(new_idx, 0) + 1
 
     def load_floor_plan(self, plan_type: str) -> None:
         """Switch to an unseen floor plan dynamically."""
@@ -293,8 +307,11 @@ class SimulationEngine:
         # Advance Helbing Social Force physics
         self.resolver.step(self.current_tick, dt=dt)
 
-        # Dynamic Congestion Rerouting check (every 8 ticks)
-        if self.current_tick % 8 == 0:
+        # Update live queue telemetry
+        self.update_exit_queues()
+
+        # Dynamic Congestion Rerouting check (every 5 ticks)
+        if self.current_tick % 5 == 0:
             self.check_congestion_rerouting()
 
         # In NORMAL_FLOW: Keep crowd circulating continuously
@@ -373,3 +390,49 @@ class SimulationEngine:
 
     def get_summary(self) -> EvacuationSummary:
         return self.metrics.get_summary(self.current_tick)
+
+    def load_scenario_congestion_demo(self) -> None:
+        """Benchmark Scenario 5: Dynamic Congestion-Aware Exit Balancing.
+
+        Spawns 20 occupants in Room A (West Wing) and adjoining hallway, all initially
+        funneling toward the single West Exit (0, 10)-(0, 11).
+        As the lead agents create a heavy queue bottleneck (15+ waiting), trailing occupants
+        autonomously recognize the queue delay, divert in real time with glowing [DIVERTER] badges,
+        and sprint across the concourse to the open South Grand Entrance and North Plaza.
+        """
+        self.reset()
+        self.set_mode(CrowdMode.EVACUATION)
+        self.set_panic(PanicLevel.ALERT)
+        self.congestion_reroute_enabled = True
+
+        # Clear existing agents
+        self.manager.agents.clear()
+
+        west_exits = [(0, 10), (0, 11)]
+
+        # Collect spawn locations inside West Wing (Room A)
+        candidates = []
+        for x in range(2, 9):
+            for y in range(4, 15):
+                if self.building.grid.is_walkable(x, y):
+                    candidates.append((x, y))
+
+        rng = random.Random(888)
+        rng.shuffle(candidates)
+        selected_spawns = candidates[:20]
+
+        for i, (sx, sy) in enumerate(selected_spawns):
+            ag = Agent(
+                agent_id=i + 1,
+                start_pos=(sx + 0.5, sy + 0.5),
+                name=f"Student_{i+1}"
+            )
+            ag.speed_factor = 0.9 + (rng.random() * 0.2)
+            ag.panic_level = PanicLevel.ALERT
+            path = bfs_shortest_path(self.building.grid, (sx, sy), west_exits)
+            if path:
+                ag.set_path(path, target_exit=path[-1])
+            self.manager.add_agent(ag)
+
+        self.update_exit_queues()
+        self.start()
