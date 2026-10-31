@@ -3,6 +3,10 @@
 An advanced, academic crowd evacuation and pedestrian simulation system featuring:
 - **Helbing's Social Force Model (SFM)** continuous 2D vector dynamics.
 - **Congestion-Aware Dynamic Exit Balancing:** detects bottleneck queues at congested doors and dynamically reroutes trailing crowds to faster open exits!
+- **Realistic Architectural Obstacles:** Information Kiosks, Cedar Seating Benches, Botanical Planters, and Lecture/Work Desks with collision boundaries and visual styling.
+- **Real-Time Exit Queue Badges:** live telemetry pill displays above every exit door (`EXIT 1 [Q:0 CLEAR]`, `EXIT 1 [Q:4 JAMMED!]`).
+- **Visual Diverter Badges:** Trailing occupants who re-route around bottleneck queues receive a glowing golden halo and floating `⚡ DIVERTER` tag.
+- **1-Click Dynamic Balancing Benchmark (Scenario 5):** Hotkey `B` instantly demonstrates 20 clustered occupants detecting a jammed doorway and dynamically splitting across open exits.
 - **Multiple Unseen Floor Plans:** Campus Complex, Corporate Office Suites, Airport Transit Terminal, and Procedural Unseen Layouts.
 - **Breadth-First Search (BFS):** Multi-source potential field global navigation guaranteeing shortest-path optimality.
 - **Interactive Mouse Toolkit:** Inspect occupant dossier, drop dynamic fire hazards, and spawn pedestrians on the fly.
@@ -11,7 +15,7 @@ An advanced, academic crowd evacuation and pedestrian simulation system featurin
 
 ---
 
-## 1. Multiple Architectural Floor Plans
+## 1. Multiple Architectural Floor Plans & Realistic Obstacles
 
 The system supports multiple distinct architectural complexes:
 
@@ -24,6 +28,12 @@ The system supports multiple distinct architectural complexes:
 4. **Procedural Unseen Layout Generator:**
    - Procedural algorithmic room partitions proving that the BFS pathfinding and continuous physics operate robustly on arbitrary unseen floor plans.
 
+### Architectural Obstacles Rendered in Each Building:
+- **`[INFO]` Information Kiosk:** Teak/mahogany reception counters in high-traffic concourse intersections.
+- **`[|||]` Cedar Seating Benches:** Slat benches providing realistic interior corridor obstacles.
+- **`[🌿]` Botanical Planters:** Lush green foliage planter boxes flanking main pedestrian thoroughfares.
+- **`[💻]` Lecture & Workstation Desks:** Functional student desk pods and office cubicles with computer monitors.
+
 *Cycle between floor plans at any time by pressing **`[L]`** or clicking **`[🏢 Cycle Map]`** on the dashboard.*
 
 ---
@@ -32,14 +42,15 @@ The system supports multiple distinct architectural complexes:
 
 In emergency situations, naive agents stubbornly pile into the closest exit, causing deadly crushing bottlenecks while alternative exits sit empty.
 
-This simulator implements **Queuing-Aware Dynamic Egress Balancing**:
+This simulator implements **Queue-Aware Dynamic Egress Balancing**:
 - For each exit portal $E_k$, the engine tracks the active queue size $Q(E_k)$ within its bottleneck catchment zone.
 - Trailing agents continually evaluate their effective travel cost:
   $$\text{Cost}(E_k) = \text{Distance}(P_i, E_k) + \alpha \times Q(E_k)$$
-- If an alternative exit portal $E_{\text{alt}}$ offers a significantly faster evacuation time (accounting for walking distance plus queue delay), trailing agents dynamically divert:
+- If an alternative exit portal $E_{\text{alt}}$ offers a significantly faster evacuation time (accounting for walking distance plus doorway queue delay), trailing agents dynamically divert:
   *"The current exit is jammed! It is faster to walk an extra few meters to the open exit!"*
-- The agent recalculates its BFS path to the alternative exit, updates its trajectory, and flags its status as `[REROUTED AROUND QUEUE]`.
-- Toggle on/off with **`[C]`** or the **`[⚖️ Balancing: ON/OFF]`** dashboard button to demonstrate the performance difference to evaluators.
+- The agent recalculates its BFS path to the alternative exit, updates its trajectory, and visibly displays a golden glowing ring and **`⚡ DIVERTER`** badge.
+- Live exit banners display real-time statuses: `[Q:0 CLEAR]` (green), `[Q:1 MODERATE]` (amber), and `[Q:2+ JAMMED!]` (crimson).
+- **1-Click Demo:** Press **`[B]`** or click **`[⚖️ Scenario 5: Demo Balancing]`** to launch a live showcase where 20 agents cluster at the West Exit and trailing occupants visibly divert to the South and North exits!
 
 ---
 
@@ -50,9 +61,9 @@ This simulator implements **Queuing-Aware Dynamic Egress Balancing**:
 | **Language** | Python 3.11 / 3.13 | High performance, standard math & collections. |
 | **Global Pathfinding** | Multi-Source BFS (`algorithms/pathfinding.py`) | Unweighted shortest path calculation. |
 | **Continuous Physics** | Helbing's Social Force Model (`simulation/physics.py`) | Vector velocity, social repulsion, wall repulsion, group cohesion. |
-| **Exit Balancing** | Dynamic Congestion Heuristic (`simulation/engine.py`) | Queue-aware exit diversion. |
+| **Exit Balancing** | Dynamic Congestion Heuristic (`simulation/engine.py`) | Queue-aware exit diversion and real-time portal monitoring. |
 | **Visualization & HUD** | Pygame 2.6.1 (`visualization/`) | 60 FPS sub-pixel continuous rendering, live S-curve graph, dossier HUD. |
-| **Testing** | Pytest 9.2.0 (`tests/`) | 43 automated unit tests covering physics, routing, floor plans, and balancing. |
+| **Testing** | Pytest 9.2.0 (`tests/`) | 45 automated unit tests covering physics, routing, floor plans, obstacles, and balancing. |
 
 ---
 
@@ -79,9 +90,10 @@ python main.py
 
 | Feature | Key / Control | What Happens |
 |---|:---:|---|
+| **Demo Dynamic Balancing** | `B` / Button | **New:** 1-click test of Congestion Balancing (20 occupants queue up and visibly divert!). |
 | **Start / Pause** | `SPACE` | Starts, pauses, or resumes the simulation. |
-| **Cycle Floor Plans** | `L` / Button | **New:** Switch between Campus, Corporate Office, Airport Terminal, and Procedural plans. |
-| **Toggle Exit Balancing** | `C` / Button | **New:** Toggles Congestion-Aware Rerouting (watch crowds split to avoid jammed doors!). |
+| **Cycle Floor Plans** | `L` / Button | Switch between Campus, Corporate Office, Airport Terminal, and Procedural plans. |
+| **Toggle Exit Balancing** | `C` / Button | Toggles Congestion-Aware Rerouting on/off to compare standard vs. balanced egress. |
 | **Inspect Person** | `I` / Left-Click | Click any person to see their dossier, speed, stress level, and path ribbon. |
 | **Drop Fire Hazard** | `F` / Left-Click | Click to drop a fire. Watch people steer around it! Right-click to extinguish. |
 | **Spawn Person** | `P` / Left-Click | Click to spawn a new pedestrian anywhere on the floor. |
@@ -94,10 +106,17 @@ python main.py
 
 ---
 
-## 6. Automated Testing (43 Tests)
+## 6. Automated Testing (45 Tests)
 
 Run the full automated test suite:
 ```powershell
+pytest -v
+```
+All 45 tests verify:
+- BFS optimal pathfinding on all floor plans.
+- Helbing continuous social force physics & wall repulsion.
+- Architectural obstacle collision and placement (Kiosk, Bench, Planter, Desk).
+- Dynamic congestion queue detection and real-time agent rerouting.
 pytest -v
 ```
 
