@@ -84,14 +84,14 @@ This simulator implements **Queue-Aware Dynamic Egress Balancing**:
 
 ## 4. Installation & Execution (Windows 11)
 
-### Step 1: Open PowerShell
+### Step 1: Open PowerShell and Enter Review 2
 ```powershell
-cd "c:\Users\DELL\OneDrive\Desktop\capstone project"
+cd "c:\Users\DELL\OneDrive\Desktop\capstone project\Review 2"
 ```
 
 ### Step 2: Activate the Virtual Environment
 ```powershell
-.\venv\Scripts\Activate.ps1
+..\venv\Scripts\Activate.ps1
 ```
 
 ### Step 3: Run the Application
@@ -123,8 +123,9 @@ python main.py
 
 ## 6. Automated Testing (45 Tests)
 
-Run the full automated test suite:
+Run the full automated test suite inside the Review 2 directory:
 ```powershell
+cd "Review 2"
 pytest -v
 ```
 All 45 tests verify:
