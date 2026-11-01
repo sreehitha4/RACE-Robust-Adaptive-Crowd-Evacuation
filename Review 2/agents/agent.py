@@ -1,7 +1,7 @@
 """Continuous 2D Agent Entity with Social Dynamics and Helbing Physics.
 
 Encapsulates individual physical properties (continuous position, velocity, mass),
-social group bonds (pairs, companions), panic/stress states, and personal dossier.
+social group bonds (pairs, companions), panic/stress states, and personal dossier. 
 """
 
 from enum import Enum
