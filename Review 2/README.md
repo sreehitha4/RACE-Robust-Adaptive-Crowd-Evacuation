@@ -13,6 +13,9 @@
 
 This repository contains the complete implementation, benchmarks, and deliverables for the **RACE (Robust & Adaptive Crowd Evacuation)** project.
 
+- 📘 **[Complete Technical & Algorithmic Documentation (Deep Reference Manual)](TECHNICAL_DOCUMENTATION.md)**
+- 📑 **[Review 2 Academic Project Report](REVIEW_2_REPORT.md)**
+
 📁 **All Review 2 source code, assets, test fixtures, and comprehensive academic documentation are packaged inside the [`Review 2/`](Review%202/) directory.**
 
 ### Key Engineering Features
