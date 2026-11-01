@@ -1,12 +1,27 @@
-# 2D Continuous Crowd Simulator — Social Force Model & BFS
+# RACE: Robust & Adaptive Crowd Evacuation Simulation
 
-An advanced, academic crowd evacuation and pedestrian simulation system featuring:
-- **Helbing's Social Force Model (SFM)** continuous 2D vector dynamics.
-- **Congestion-Aware Dynamic Exit Balancing:** detects bottleneck queues at congested doors and dynamically reroutes trailing crowds to faster open exits!
-- **Realistic Architectural Obstacles:** Information Kiosks, Cedar Seating Benches, Botanical Planters, and Lecture/Work Desks with collision boundaries and visual styling.
-- **Real-Time Exit Queue Badges:** live telemetry pill displays above every exit door (`EXIT 1 [Q:0 CLEAR]`, `EXIT 1 [Q:4 JAMMED!]`).
-- **Visual Diverter Badges:** Trailing occupants who re-route around bottleneck queues receive a glowing golden halo and floating `⚡ DIVERTER` tag.
-- **1-Click Dynamic Balancing Benchmark (Scenario 5):** Hotkey `B` instantly demonstrates 20 clustered occupants detecting a jammed doorway and dynamically splitting across open exits.
+**Research and implementation of robust continuous crowd evacuation and dynamic exit balancing in unseen architectural environments.**
+
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Pygame](https://img.shields.io/badge/Pygame-2.6.1-green.svg)](https://www.pygame.org/)
+[![Tests](https://img.shields.io/badge/Tests-45%20Passing-brightgreen.svg)](tests/)
+[![Milestone](https://img.shields.io/badge/Milestone-Review%202-orange.svg)](Review%202/)
+
+---
+
+## 📌 Repository Overview & Review 2 Milestone
+
+This repository contains the complete implementation, benchmarks, and deliverables for the **RACE (Robust & Adaptive Crowd Evacuation)** project.
+
+📁 **All Review 2 source code, assets, test fixtures, and comprehensive academic documentation are packaged inside the [`Review 2/`](Review%202/) directory.**
+
+### Key Engineering Features
+- **Helbing's Social Force Model (SFM):** Continuous 2D vector dynamics (desired drive, interpersonal repulsion, boundary wall friction, and social group cohesion).
+- **Congestion-Aware Dynamic Exit Balancing:** Trailing occupants actively detect doorway bottleneck queues and dynamically re-route to alternative exits.
+- **Realistic Architectural Obstacles:** Information Kiosks, Cedar Benches, Botanical Planters, and Work Desks with physical collision boundaries.
+- **Real-Time Exit Queue Badges:** Real-time doorway status pills (`[Q:0 CLEAR]`, `[Q:1 MODERATE]`, `[Q:X JAMMED!]`).
+- **Visual Diverter Badges:** Glowing golden halos and `⚡ DIVERTER` indicators over agents who dynamically route around bottleneck queues.
+- **1-Click Dynamic Balancing Benchmark (Scenario 5):** Instant demonstration of 20 clustered occupants detecting a jammed doorway and dynamically splitting across open exits (Hotkey `B`).
 - **Multiple Unseen Floor Plans:** Campus Complex, Corporate Office Suites, Airport Transit Terminal, and Procedural Unseen Layouts.
 - **Breadth-First Search (BFS):** Multi-source potential field global navigation guaranteeing shortest-path optimality.
 - **Interactive Mouse Toolkit:** Inspect occupant dossier, drop dynamic fire hazards, and spawn pedestrians on the fly.
@@ -30,7 +45,7 @@ The system supports multiple distinct architectural complexes:
 
 ### Architectural Obstacles Rendered in Each Building:
 - **`[INFO]` Information Kiosk:** Teak/mahogany reception counters in high-traffic concourse intersections.
-- **`[|||]` Cedar Seating Benches:** Slat benches providing realistic interior corridor obstacles.
+- **`[|||]` Cedar Seating Benches:** Real slat benches providing realistic corridor obstacles.
 - **`[🌿]` Botanical Planters:** Lush green foliage planter boxes flanking main pedestrian thoroughfares.
 - **`[💻]` Lecture & Workstation Desks:** Functional student desk pods and office cubicles with computer monitors.
 
@@ -90,7 +105,7 @@ python main.py
 
 | Feature | Key / Control | What Happens |
 |---|:---:|---|
-| **Demo Dynamic Balancing** | `B` / Button | **New:** 1-click test of Congestion Balancing (20 occupants queue up and visibly divert!). |
+| **Demo Dynamic Balancing** | `B` / Button | **1-click benchmark:** 20 occupants queue up at West Exit and trailing crowd visibly diverts! |
 | **Start / Pause** | `SPACE` | Starts, pauses, or resumes the simulation. |
 | **Cycle Floor Plans** | `L` / Button | Switch between Campus, Corporate Office, Airport Terminal, and Procedural plans. |
 | **Toggle Exit Balancing** | `C` / Button | Toggles Congestion-Aware Rerouting on/off to compare standard vs. balanced egress. |
@@ -117,9 +132,3 @@ All 45 tests verify:
 - Helbing continuous social force physics & wall repulsion.
 - Architectural obstacle collision and placement (Kiosk, Bench, Planter, Desk).
 - Dynamic congestion queue detection and real-time agent rerouting.
-pytest -v
-```
-
-```text
-============================= 43 passed in 0.66s ==============================
-```
