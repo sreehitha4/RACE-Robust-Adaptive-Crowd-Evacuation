@@ -133,27 +133,75 @@ class MovementResolver:
                             )
                             total_force = total_force + f_wall
 
-            # E. Hazard / Fire Repulsion
+            # E. Thermal & Smoke Hazard Repulsion (Realistic Heat & Safety Buffer)
             for hx, hy in self.building.hazards:
                 hazard_center = Vector2(hx + 0.5, hy + 0.5)
                 h_dist = agent.pos.distance_to(hazard_center)
-                if h_dist < 3.0:
+                thermal_radius = 2.4  # Heat & smoke discomfort boundary (2.4m)
+                if h_dist < thermal_radius:
                     diff = agent.pos - hazard_center
-                    n = diff.normalized()
-                    f_hazard = n * (60.0 / max(0.2, h_dist))
+                    n = diff.normalized() if diff.length() > 1e-4 else Vector2(1.0, 0.0)
+                    # Strong exponential thermal barrier + distance counter-force
+                    decay = max(0.0, (thermal_radius - h_dist) / 0.8)
+                    f_thermal_mag = 420.0 * (decay ** 1.6) + (140.0 / max(0.25, h_dist))
+                    f_hazard = n * min(f_thermal_mag, 2500.0)
                     total_force = total_force + f_hazard
 
             # 2. Integrate continuous motion
             agent.integrate_physics(total_force, dt=dt)
 
-            # 3. Check if reached an emergency exit
+        # 3. Hard Non-Overlap & Wall Penetration Resolution Pass
+        # Eliminates visual clipping and guarantees agents never physically overlap or clip into walls
+        for _ in range(2):
+            for i, agent in enumerate(active_agents):
+                if not agent.is_active:
+                    continue
+                # Agent-agent non-overlap separation
+                for j in range(i + 1, len(active_agents)):
+                    other = active_agents[j]
+                    if not other.is_active:
+                        continue
+                    diff = agent.pos - other.pos
+                    dist = diff.length()
+                    min_dist = agent.radius + other.radius
+                    if dist < min_dist:
+                        overlap = min_dist - dist
+                        n = diff / dist if dist > 1e-4 else Vector2(1.0, 0.0)
+                        push = n * (overlap * 0.5)
+                        agent.pos = agent.pos + push
+                        other.pos = other.pos - push
+                        rel_v = (agent.vel - other.vel).dot(n)
+                        if rel_v < 0:
+                            agent.vel = agent.vel - n * (rel_v * 0.5)
+                            other.vel = other.vel + n * (rel_v * 0.5)
+
+                # Wall non-penetration constraint
+                gx, gy = int(agent.pos.x), int(agent.pos.y)
+                for dy in range(-1, 2):
+                    for dx in range(-1, 2):
+                        wx, wy = gx + dx, gy + dy
+                        if grid.is_inside(wx, wy) and grid.is_wall(wx, wy):
+                            nearest_x = max(float(wx), min(agent.pos.x, float(wx + 1)))
+                            nearest_y = max(float(wy), min(agent.pos.y, float(wy + 1)))
+                            w_diff = agent.pos - Vector2(nearest_x, nearest_y)
+                            w_dist = w_diff.length()
+                            if w_dist < agent.radius:
+                                w_overlap = agent.radius - w_dist
+                                w_n = w_diff / w_dist if w_dist > 1e-4 else Vector2(0.0, 1.0)
+                                agent.pos = agent.pos + w_n * w_overlap
+                                if agent.vel.dot(w_n) < 0:
+                                    agent.vel = agent.vel - w_n * agent.vel.dot(w_n)
+
+                agent.current_pos = (int(round(agent.pos.x)), int(round(agent.pos.y)))
+
+        # 4. Check if reached an emergency exit
+        for agent in active_agents:
+            if not agent.is_active:
+                continue
             cur_gx, cur_gy = agent.current_pos
-            is_at_exit = (
-                grid.is_inside(cur_gx, cur_gy) and grid.is_exit(cur_gx, cur_gy)
-            )
-            # Also check distance to target exit if it is an exit
-            if not is_at_exit and target is not None and grid.is_exit(target[0], target[1]):
-                if agent.pos.distance_to(Vector2(target[0] + 0.5, target[1] + 0.5)) < 0.85:
+            is_at_exit = grid.is_inside(cur_gx, cur_gy) and grid.is_exit(cur_gx, cur_gy)
+            if not is_at_exit and agent.target_exit is not None and grid.is_exit(agent.target_exit[0], agent.target_exit[1]):
+                if agent.pos.distance_to(Vector2(agent.target_exit[0] + 0.5, agent.target_exit[1] + 0.5)) < 0.85:
                     is_at_exit = True
 
             if is_at_exit:

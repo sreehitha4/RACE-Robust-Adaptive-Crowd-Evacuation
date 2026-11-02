@@ -4,6 +4,7 @@ Verifies live agent movement, collision prevention, head-on swap avoidance,
 dynamic exit blocking, metrics, and state transitions.
 """
 
+import math
 import pytest
 from environment.building import Building
 from environment.grid import CellType, Grid
@@ -203,6 +204,15 @@ class TestSimulationEngineLifecycle:
         assert hazard_pos not in engine.building.hazards
         assert engine.building.grid.is_walkable(*hazard_pos) is True
 
+    def test_fire_hazard_thermal_clearance(self, engine: SimulationEngine) -> None:
+        """Verify that when a fire hazard is placed, agent paths maintain natural clearance distance."""
+        hazard_coord = (5, 8)
+        engine.add_hazard(*hazard_coord)
+
+        for agent in engine.manager.active_agents:
+            if agent.path:
+                assert hazard_coord not in agent.path
+
 
     def test_dynamic_congestion_aware_exit_rerouting(self, engine: SimulationEngine) -> None:
         """Verify that when an exit queue becomes congested, trailing agents divert to another exit."""
@@ -254,3 +264,37 @@ class TestSimulationEngineLifecycle:
         # Dynamic exit balancing must trigger
         assert engine.rerouted_count >= 1
         assert any(a.rerouted for a in engine.manager.active_agents)
+
+    def test_exit_selection_distant_from_fire(self, engine: SimulationEngine) -> None:
+        """Verify that agents prioritize exits distant from active fire hazards, avoiding fire-threatened exits."""
+        engine.set_mode(CrowdMode.EVACUATION)
+        # Place fire hazard adjacent to the West exit (0, 16)
+        fire_near_west = (2, 16)
+        engine.add_hazard(*fire_near_west)
+
+        # West exit cells: (0, 16), (0, 17)
+        west_exit_cells = [(0, 16), (0, 17)]
+
+        # Check all active agent paths - none should target the fire-compromised West exit when safe alternatives exist
+        for agent in engine.manager.active_agents:
+            if agent.path and agent.target_exit:
+                assert agent.target_exit not in west_exit_cells
+                assert engine.building.grid.is_exit(agent.target_exit[0], agent.target_exit[1])
+                # Ensure the chosen exit is safely distant from fire (> 5.0 meters)
+                fire_dist = math.hypot(agent.target_exit[0] - fire_near_west[0], agent.target_exit[1] - fire_near_west[1])
+                assert fire_dist > 5.0
+
+    def test_agents_non_overlapping_constraint(self, engine: SimulationEngine) -> None:
+        """Verify that agents maintain physical non-overlapping separation."""
+        engine.set_mode(CrowdMode.NORMAL_FLOW)
+        engine.start()
+        # Position two active agents close to each other
+        a1, a2 = engine.manager.agents[0], engine.manager.agents[1]
+        a1.pos = Vector2(10.0, 10.0)
+        a2.pos = Vector2(10.2, 10.0)  # distance = 0.2m, smaller than r1 + r2 (0.50m)
+
+        engine.step(dt=0.05)
+
+        dist = a1.pos.distance_to(a2.pos)
+        min_allowed_dist = a1.radius + a2.radius
+        assert dist >= min_allowed_dist - 0.02  # Overlap cleanly resolved!

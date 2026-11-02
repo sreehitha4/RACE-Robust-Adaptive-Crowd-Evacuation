@@ -72,12 +72,12 @@ class SocialForceModel:
     def __init__(
         self,
         tau: float = 0.5,
-        A_agent: float = 20.0,
-        B_agent: float = 0.8,
-        A_wall: float = 30.0,
-        B_wall: float = 0.6,
-        k_body: float = 120.0,
-        k_friction: float = 40.0
+        A_agent: float = 240.0,
+        B_agent: float = 0.35,
+        A_wall: float = 260.0,
+        B_wall: float = 0.30,
+        k_body: float = 1600.0,
+        k_friction: float = 80.0
     ) -> None:
         self.tau: float = tau
         self.A_agent: float = A_agent

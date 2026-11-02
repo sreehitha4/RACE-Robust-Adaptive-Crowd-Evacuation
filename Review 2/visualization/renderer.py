@@ -60,7 +60,7 @@ class BuildingRenderer:
 
     def _init_fonts(self) -> None:
         if self.font_small is None:
-            self.font_small = pygame.font.SysFont("Segoe UI", 9, bold=True)
+            self.font_small = pygame.font.SysFont("Segoe UI", 8, bold=True)
             self.font_room = pygame.font.SysFont("Segoe UI", 11, bold=True)
             self.font_exit = pygame.font.SysFont("Segoe UI", 8, bold=True)
             self.font_badge = pygame.font.SysFont("Segoe UI", 7, bold=True)
@@ -280,7 +280,7 @@ class BuildingRenderer:
     ) -> None:
         """Render continuous crowd agents, heading orientations, and group dynamics."""
         self._init_fonts()
-        radius = int(self.cell_size * 0.38)
+        radius = max(5, int(self.cell_size * 0.25))
 
         # 1. Draw Companion Tether Lines (connecting pairs/friends)
         active_map = {a.agent_id: a for a in agents if a.is_active}

@@ -51,7 +51,7 @@ class Agent:
         self.current_pos: Tuple[int, int] = self.start_pos  # Discrete grid cell sync
 
         # Physical dimensions
-        self.radius: float = 0.38      # Body radius
+        self.radius: float = 0.25      # Body radius (0.25m = 50cm shoulder width, preventing overlap)
         self.mass: float = 70.0        # Mass in kg
 
         # Social & Psychological Attributes

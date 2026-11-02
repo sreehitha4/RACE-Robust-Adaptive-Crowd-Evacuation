@@ -11,6 +11,7 @@ Coordinates:
 """
 
 from enum import Enum
+import math
 import random
 from typing import Dict, List, Optional, Set, Tuple
 from environment.building import Building
@@ -101,31 +102,78 @@ class SimulationEngine:
                 continue
 
             target = rng.choice(walkable_pools)
-            path = bfs_shortest_path(grid, start=agent.current_pos, goals=[target])
+            path = bfs_shortest_path(grid, start=agent.current_pos, goals=[target], hazards=self.building.hazards)
             if path and len(path) > 1:
                 agent.set_path(path, target_exit=target)
                 agent.normal_target = target
                 if agent.state == AgentState.EVACUATED:
                     agent.state = AgentState.ACTIVE
 
-    def recalculate_evacuation_paths(self) -> None:
-        """Calculate optimal BFS paths towards available emergency exits."""
-        active_exits = [
-            e for e in self.building.grid.get_exits()
-            if e not in self.blocked_exits and self.building.grid.is_walkable(e[0], e[1])
-        ]
+    def get_portal_fire_distance(self, portal: List[Tuple[int, int]]) -> float:
+        """Calculate minimum Euclidean distance from any cell in this exit portal to active fire hazards."""
+        if not self.building.hazards:
+            return float('inf')
+        min_d = float('inf')
+        for pe in portal:
+            for hx, hy in self.building.hazards:
+                d = math.hypot(pe[0] - hx, pe[1] - hy)
+                if d < min_d:
+                    min_d = d
+        return min_d
 
-        if not active_exits:
+    def get_portal_hazard_penalty(self, portal: List[Tuple[int, int]]) -> float:
+        """Calculate psychological hazard aversion penalty for selecting an exit portal.
+        Exits near active fire hazards receive steep penalties so pedestrians naturally choose
+        exits distant and safe from the fire.
+        """
+        fire_dist = self.get_portal_fire_distance(portal)
+        if fire_dist == float('inf'):
+            return 0.0
+        # If exit portal is dangerously close to fire (< 4.0 meters)
+        if fire_dist < 4.0:
+            return 500.0
+        # If exit portal is moderately close to fire (< 20.0 meters)
+        elif fire_dist < 20.0:
+            return (20.0 - fire_dist) * 3.0
+        return 0.0
+
+    def recalculate_evacuation_paths(self) -> None:
+        """Calculate optimal BFS paths towards available emergency exits, prioritizing
+        exits that are distant and safe from active fire hazards.
+        """
+        portals = self.get_exit_portals()
+        if not portals:
             for agent in self.manager.active_agents:
                 agent.mark_stuck(reason="All exits blocked")
             return
 
-        field = MultiSourceDistanceField(self.building.grid, active_exits)
+        # Precompute distance fields and hazard penalties for each exit portal
+        portal_fields = {
+            idx: MultiSourceDistanceField(self.building.grid, portal, hazards=self.building.hazards)
+            for idx, portal in enumerate(portals)
+        }
+        portal_penalties = {
+            idx: self.get_portal_hazard_penalty(portal)
+            for idx, portal in enumerate(portals)
+        }
 
         for agent in self.manager.active_agents:
-            path = field.get_path_from(agent.current_pos)
-            if path is not None and len(path) > 0:
-                agent.set_path(path, target_exit=path[-1])
+            best_cost = float('inf')
+            best_path = None
+
+            for idx in range(len(portals)):
+                field = portal_fields[idx]
+                dist = field.get_distance(agent.current_pos)
+                if dist is None:
+                    continue
+
+                cost = dist + portal_penalties[idx]
+                if cost < best_cost:
+                    best_cost = cost
+                    best_path = field.get_path_from(agent.current_pos)
+
+            if best_path is not None and len(best_path) > 0:
+                agent.set_path(best_path, target_exit=best_path[-1])
             else:
                 agent.mark_stuck(reason="No accessible exit found")
 
@@ -169,7 +217,7 @@ class SimulationEngine:
 
     def check_congestion_rerouting(self) -> None:
         """Detect exit bottlenecks and dynamically reroute trailing crowd members
-        to less congested nearby exits.
+        to less congested nearby exits or away from exits in fire hazard zones.
         """
         self.update_exit_queues()
         if not self.congestion_reroute_enabled or self.crowd_mode != CrowdMode.EVACUATION:
@@ -194,15 +242,18 @@ class SimulationEngine:
                 continue
 
             cur_queue = self.portal_queues.get(cur_p_idx, 0)
-            if cur_queue < 2:
-                continue  # No bottleneck at this portal
+            cur_hazard_penalty = self.get_portal_hazard_penalty(portals[cur_p_idx])
+
+            # Only skip rerouting if neither queue congestion nor fire hazard threatens this exit
+            if cur_queue < 2 and cur_hazard_penalty == 0:
+                continue
 
             dist_to_cur = agent.pos.distance_to(Vector2(cur_target[0] + 0.5, cur_target[1] + 0.5))
-            if dist_to_cur < 2.5:
-                continue  # Already about to step through portal, do not turn around
+            if dist_to_cur < 2.5 and cur_hazard_penalty < 500.0:
+                continue  # Already about to step through portal unless it's in immediate fire danger
 
-            # Delay cost model: travel distance + doorway queue wait time
-            cost_cur = dist_to_cur + (cur_queue * 2.2)
+            # Delay & safety cost model: travel distance + doorway queue wait time + fire proximity risk
+            cost_cur = dist_to_cur + (cur_queue * 2.2) + cur_hazard_penalty
 
             best_alt_portal = None
             best_alt_cost = cost_cur
@@ -214,11 +265,12 @@ class SimulationEngine:
                 alt_queue = self.portal_queues.get(alt_idx, 0)
                 alt_target = alt_p[0]
                 dist_to_alt = agent.pos.distance_to(Vector2(alt_target[0] + 0.5, alt_target[1] + 0.5))
-                cost_alt = dist_to_alt + (alt_queue * 2.2)
+                alt_hazard_penalty = self.get_portal_hazard_penalty(alt_p)
+                cost_alt = dist_to_alt + (alt_queue * 2.2) + alt_hazard_penalty
 
-                # Reroute if alternate exit offers noticeably faster overall egress
+                # Reroute if alternate exit offers noticeably safer/faster overall egress
                 if cost_alt + 1.2 < best_alt_cost:
-                    path = bfs_shortest_path(grid, agent.current_pos, alt_p)
+                    path = bfs_shortest_path(grid, agent.current_pos, alt_p, hazards=self.building.hazards)
                     if path and len(path) > 1:
                         best_alt_cost = cost_alt
                         best_alt_portal = alt_p
@@ -270,15 +322,24 @@ class SimulationEngine:
         agent = self.manager.spawn_single_at(x, y)
         if agent:
             if self.crowd_mode == CrowdMode.EVACUATION:
-                field = MultiSourceDistanceField(self.building.grid, self.building.grid.get_exits())
-                path = field.get_path_from(agent.current_pos)
-                if path:
-                    agent.set_path(path, target_exit=path[-1])
+                portals = self.get_exit_portals()
+                best_cost = float('inf')
+                best_path = None
+                for portal in portals:
+                    field = MultiSourceDistanceField(self.building.grid, portal, hazards=self.building.hazards)
+                    dist = field.get_distance(agent.current_pos)
+                    if dist is not None:
+                        cost = dist + self.get_portal_hazard_penalty(portal)
+                        if cost < best_cost:
+                            best_cost = cost
+                            best_path = field.get_path_from(agent.current_pos)
+                if best_path:
+                    agent.set_path(best_path, target_exit=best_path[-1])
             else:
                 rng = random.Random()
                 pools = [c for c in self.building.grid.get_exits() if self.building.grid.is_walkable(c[0], c[1])]
                 target = rng.choice(pools) if pools else (15, 15)
-                path = bfs_shortest_path(self.building.grid, agent.current_pos, [target])
+                path = bfs_shortest_path(self.building.grid, agent.current_pos, [target], hazards=self.building.hazards)
                 if path:
                     agent.set_path(path, target_exit=target)
         return agent
@@ -325,7 +386,7 @@ class SimulationEngine:
                         candidates.extend(room.get_interior_cells())
                     walkable = [c for c in candidates if grid.is_walkable(c[0], c[1])]
                     new_target = rng.choice(walkable)
-                    path = bfs_shortest_path(grid, agent.current_pos, [new_target])
+                    path = bfs_shortest_path(grid, agent.current_pos, [new_target], hazards=self.building.hazards)
                     if path and len(path) > 1:
                         agent.set_path(path, target_exit=new_target)
                         agent.normal_target = new_target
