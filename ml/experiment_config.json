@@ -1,0 +1,7 @@
+{
+    "input_size": 2,
+    "hidden_size": 64,
+    "num_layers": 2,
+    "observed_steps": 8,
+    "prediction_steps": 12
+}

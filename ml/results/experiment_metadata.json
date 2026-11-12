@@ -1,0 +1,16 @@
+{
+    "dataset": "ETH-UCY",
+    "held_out_scene": "ETH",
+    "test_sequences": 364,
+    "observed_steps": 8,
+    "prediction_steps": 12,
+    "model": "Encoder-Decoder LSTM",
+    "hidden_size": 64,
+    "num_layers": 2,
+    "validation_ADE": 0.44251155853271484,
+    "validation_FDE": 0.9523701667785645,
+    "test_ADE": 1.0085105895996094,
+    "test_FDE": 2.0267581939697266,
+    "test_baseline_ADE": 1.07545804977417,
+    "test_baseline_FDE": 2.2818901538848877
+}

@@ -1,0 +1,5 @@
+Dataset,Metric,Constant Velocity,LSTM,Improvement (%)
+Validation,ADE,0.44707057,0.44251156,1.0197518
+Validation,FDE,0.98773414,0.95237017,3.5803127
+Held-out ETH Test,ADE,1.075458,1.0085106,6.225018
+Held-out ETH Test,FDE,2.2818902,2.0267582,11.18073
