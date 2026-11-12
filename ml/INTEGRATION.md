@@ -95,3 +95,5 @@ history for each agent.
 
 The model predicts movement preferences; it does not
 directly control the simulation.
+
+The trained model checkpoint is maintained separately from the public GitHub repository. It must be shared with the integration team through an approved file-sharing method. The inference module requires the checkpoint to be available at the configured path.
