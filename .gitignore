@@ -33,3 +33,16 @@ Desktop.ini
 ~*
 *.tmp
 *_files/
+
+.venv/
+
+# Python virtual environments
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environment variables
+.env
