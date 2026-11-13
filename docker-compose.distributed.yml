@@ -1,0 +1,15 @@
+services:
+  api:
+    build: { context: ., dockerfile: Dockerfile.ray }
+    environment:
+      RAY_ADDRESS: ray-head:6379
+    depends_on:
+      ray-head:
+        condition: service_started
+
+  ray-head:
+    build: { context: ., dockerfile: Dockerfile.ray }
+    command: ["ray", "start", "--head", "--port=6379", "--dashboard-host=0.0.0.0", "--block"]
+    ports: ["8265:8265"]
+    shm_size: "2gb"
+    restart: unless-stopped

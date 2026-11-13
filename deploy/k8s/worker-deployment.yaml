@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: race-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: race-worker }
+  template:
+    metadata:
+      labels: { app: race-worker }
+    spec:
+      containers:
+        - name: worker
+          image: race-api:latest
+          command: ["celery", "-A", "server.workers.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+          env:
+            - name: RACE_CELERY_BROKER_URL
+              valueFrom:
+                secretKeyRef: { name: race-secrets, key: celery-broker-url }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "2Gi" }

@@ -1,0 +1,88 @@
+name: race-platform
+services:
+  api:
+    build: { context: ., dockerfile: Dockerfile.backend }
+    environment:
+      RACE_REDIS_URL: redis://redis:6379/0
+      RACE_OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      RACE_LOG_LEVEL: INFO
+    ports: ["8000:8000"]
+    depends_on: [redis, otel-collector]
+    volumes: ["race-data:/app/data", "race-models:/app/simulation_environment/ml/models"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  frontend:
+    build: { context: ., dockerfile: Dockerfile.frontend }
+    ports: ["8080:80"]
+    depends_on: [api]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 3s, retries: 5 }
+    restart: unless-stopped
+
+  worker:
+    build: { context: ., dockerfile: Dockerfile.backend }
+    command: ["celery", "-A", "server.workers.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment:
+      RACE_CELERY_BROKER_URL: redis://redis:6379/1
+      RACE_CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on: [redis]
+    profiles: ["workers"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes: ["./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro", "prometheus-data:/prometheus"]
+    ports: ["9090:9090"]
+    depends_on: [api]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-change-me}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    ports: ["16686:16686"]
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro"]
+    ports: ["4317:4317", "4318:4318"]
+    depends_on: [jaeger]
+    restart: unless-stopped
+
+  collaboration:
+    build: ./collaboration
+    ports: ["1234:1234"]
+    profiles: ["collaboration"]
+    restart: unless-stopped
+
+volumes:
+  race-data:
+  race-models:
+  redis-data:
+  prometheus-data:
+  grafana-data:

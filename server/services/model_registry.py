@@ -1,150 +1,174 @@
-from __future__ import annotations
+
+"""Atomic model candidate loading and activation for the live simulation."""
 
 import json
-import logging
-import os
 import re
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Any
 
-logger = logging.getLogger(__name__)
-MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.pth$")
+import numpy as np
+
+
+MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 
 
 class ModelRegistryError(ValueError):
-    pass
+    """Raised when a model registry operation fails validation."""
 
 
 class ModelRegistry:
-    """Versioned model registry with validate-before-activate semantics.
+    def __init__(self, model_dir, loader=None):
+        self.model_dir = Path(model_dir).resolve()
+        self.model_dir.mkdir(parents=True, exist_ok=True)
 
-    `loader` must construct a usable predictor from a checkpoint path. The
-    default loader integrates with ml/model_inference.py. Tests may inject a
-    lightweight loader. The active pointer is persisted with os.replace().
-    """
-
-    def __init__(
-        self,
-        models_dir: str | Path = "ml/weights",
-        loader: Callable[[str], Any] | None = None,
-    ):
-        self.models_dir = Path(models_dir).resolve()
-        self.models_dir.mkdir(parents=True, exist_ok=True)
-        self.pointer_path = self.models_dir / "active_model.json"
-        self._loader = loader or self._load_race_predictor
+        self.pointer = self.model_dir / "active_model.json"
         self._lock = threading.RLock()
-        self._active_model = None
-        self._active_model_id: str | None = None
-        self._load_persisted_active()
 
-    @staticmethod
-    def _load_race_predictor(checkpoint_path: str):
-        import sys
-        checkpoint = Path(checkpoint_path).resolve()
-        repo_root = checkpoint.parents[2] if len(checkpoint.parents) > 2 else Path.cwd()
-        ml_dir = repo_root / "ml"
-        if str(ml_dir) not in sys.path:
-            sys.path.insert(0, str(ml_dir))
-        try:
-            from model_inference import RACEPredictor
-        except ImportError as exc:
-            raise ModelRegistryError(
-                "Could not import RACEPredictor from ml/model_inference.py"
-            ) from exc
-        return RACEPredictor(str(checkpoint))
+        # Optional injectable loader for tests.
+        # Production defaults to the actual RACEPredictor.
+        self.loader = loader
 
-    def _validate_model_id(self, model_id: str) -> Path:
-        if not MODEL_ID_RE.fullmatch(model_id):
-            raise ModelRegistryError("Invalid model_id; expected a .pth checkpoint filename")
-        path = (self.models_dir / model_id).resolve()
-        if path.parent != self.models_dir or not path.is_file():
-            raise FileNotFoundError(f"Model checkpoint '{model_id}' not found")
-        return path
+        self.active_model = None
+        self.active_model_id = None
 
-    def _load_persisted_active(self) -> None:
-        if not self.pointer_path.is_file():
+        self._restore_active_model_id()
+
+    def _restore_active_model_id(self):
+        if not self.pointer.is_file():
             return
+
         try:
-            payload = json.loads(self.pointer_path.read_text(encoding="utf-8"))
-            model_id = payload.get("model_id")
-            path = self._validate_model_id(model_id)
-            candidate = self._loader(str(path))
-            self._active_model = candidate
-            self._active_model_id = model_id
-        except Exception:
-            logger.exception("Persisted active model could not be loaded; no model activated")
+            data = json.loads(self.pointer.read_text(encoding="utf-8"))
+            model_id = data.get("model_id")
 
-    def list_models(self) -> list[dict]:
-        with self._lock:
-            models = []
-            for path in sorted(self.models_dir.glob("*.pth")):
-                if not path.is_file():
-                    continue
-                stat = path.stat()
-                models.append({
-                    "model_id": path.name,
-                    "size_bytes": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(
-                        stat.st_mtime, tz=timezone.utc
-                    ).isoformat(),
-                    "is_active": path.name == self._active_model_id,
-                })
-            return models
+            if isinstance(model_id, str):
+                self.active_model_id = f"{model_id}.pth"
 
-    def activate(self, model_id: str) -> dict:
-        path = self._validate_model_id(model_id)
-        if path.stat().st_size == 0:
-            raise ModelRegistryError("Checkpoint file is empty")
+        except (OSError, json.JSONDecodeError):
+            self.active_model_id = None
 
-        # Construct and validate the candidate before touching active state.
-        try:
-            candidate = self._loader(str(path))
-            if candidate is None:
-                raise ModelRegistryError("Model loader returned no predictor")
-            if not callable(getattr(candidate, "predict", None)):
-                raise ModelRegistryError("Loaded model does not expose predict()")
-        except Exception as exc:
-            raise ModelRegistryError(f"Checkpoint validation failed: {exc}") from exc
+    def list(self):
+        active = None
 
-        with self._lock:
-            previous_model = self._active_model
-            previous_id = self._active_model_id
-            temp_pointer = self.models_dir / ".active_model.json.tmp"
-            payload = {
-                "model_id": model_id,
-                "activated_at": datetime.now(timezone.utc).isoformat(),
-            }
+        if self.pointer.exists():
             try:
-                with temp_pointer.open("w", encoding="utf-8") as stream:
-                    json.dump(payload, stream, indent=2)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temp_pointer, self.pointer_path)
-                self._active_model = candidate
-                self._active_model_id = model_id
-            except Exception:
-                temp_pointer.unlink(missing_ok=True)
-                self._active_model = previous_model
-                self._active_model_id = previous_id
-                raise
+                active = json.loads(
+                    self.pointer.read_text(encoding="utf-8")
+                ).get("model_id")
+            except (OSError, json.JSONDecodeError):
+                active = None
 
-        return {"model_id": model_id, "previous_model_id": previous_id, "status": "active"}
+        return [
+            {
+                "model_id": path.stem,
+                "active": path.stem == active,
+                "bytes": path.stat().st_size,
+            }
+            for path in sorted(self.model_dir.glob("*.pth"))
+        ]
 
-    @property
-    def active_model(self):
+    def _resolve_checkpoint(self, model_id):
+        if not isinstance(model_id, str):
+            raise ModelRegistryError("Invalid model identifier")
+
+        # Accept both "model_name" and "model_name.pth".
+        filename = model_id
+
+        if filename.endswith(".pth"):
+            identifier = filename[:-4]
+        else:
+            identifier = filename
+            filename = f"{identifier}.pth"
+
+        # Reject paths, traversal, and unsupported extensions.
+        if (
+            not MODEL_ID.fullmatch(identifier)
+            or "/" in model_id
+            or "\\" in model_id
+            or model_id in (".", "..")
+        ):
+            raise ModelRegistryError("Invalid model identifier")
+
+        path = (self.model_dir / filename).resolve()
+
+        if path.parent != self.model_dir or not path.is_file():
+            raise FileNotFoundError("Model checkpoint not found")
+
+        return path, identifier, filename
+
+    def _load_candidate(self, path):
+        try:
+            if self.loader is not None:
+                candidate = self.loader(str(path))
+            else:
+                from simulation_environment.ml.model_inference import (
+                    RACEPredictor,
+                )
+
+                candidate = RACEPredictor(str(path))
+
+            # Validate inference before changing the active model.
+            probe = np.zeros((8, 2), dtype=np.float32)
+            result = np.asarray(
+                candidate.predict(probe),
+                dtype=np.float32,
+            )
+
+            if result.shape != (12, 2):
+                raise ModelRegistryError(
+                    "Candidate model must return predictions with shape (12, 2)"
+                )
+
+            if not np.isfinite(result).all():
+                raise ModelRegistryError(
+                    "Candidate model returned non-finite predictions"
+                )
+
+            return candidate
+
+        except ModelRegistryError:
+            raise
+        except Exception as exc:
+            raise ModelRegistryError(
+                f"Could not load or validate model: {exc}"
+            ) from exc
+
+    def activate(self, model_id, runtime=None):
+        path, identifier, filename = self._resolve_checkpoint(model_id)
+
+        # Candidate must load and pass inference validation first.
+        candidate = self._load_candidate(path)
+
         with self._lock:
-            return self._active_model
+            temp = self.pointer.with_suffix(".tmp")
 
-    @property
-    def active_model_id(self) -> str | None:
-        with self._lock:
-            return self._active_model_id
+            try:
+                temp.write_text(
+                    json.dumps({"model_id": identifier}),
+                    encoding="utf-8",
+                )
 
-    def predict(self, observed_positions):
-        with self._lock:
-            model = self._active_model
-        if model is None:
-            raise ModelRegistryError("No active model is available")
-        return model.predict(observed_positions)
+                # Atomically update the active model pointer.
+                temp.replace(self.pointer)
+
+                # Preserve the production runtime activation path.
+                if runtime is not None:
+                    from server.services.ml_service import MeasuredPredictor
+
+                    runtime.simulation.ml.predictor = MeasuredPredictor(
+                        candidate
+                    )
+                    runtime.simulation.ml.enabled = True
+
+                self.active_model = candidate
+                self.active_model_id = filename
+
+            finally:
+                temp.unlink(missing_ok=True)
+
+        return {
+            "model_id": identifier,
+            "status": "active",
+            "active": True,
+            "device": str(getattr(candidate, "device", "unknown")),
+        }

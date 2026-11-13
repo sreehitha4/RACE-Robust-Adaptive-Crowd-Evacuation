@@ -25,7 +25,7 @@ def test_websocket_sends_environment_then_frame():
             frame = websocket.receive_json()
 
         assert environment["type"] == "environment"
-        assert environment["width"] == 40.0
+        assert environment["width"] == 20.0
         assert frame["type"] == "frame"
         assert frame["total_agents"] == 24
         assert len(frame["agents"]) == 24

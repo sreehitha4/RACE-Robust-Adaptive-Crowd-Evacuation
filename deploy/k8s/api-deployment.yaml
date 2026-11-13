@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: race-api
+spec:
+  # Keep one replica while the live simulation state is process-local.
+  replicas: 1
+  selector:
+    matchLabels: { app: race-api }
+  template:
+    metadata:
+      labels: { app: race-api }
+    spec:
+      containers:
+        - name: api
+          image: race-api:latest
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: RACE_REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: race-secrets, key: redis-url }
+          readinessProbe:
+            httpGet: { path: /ready, port: 8000 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "4Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: race-api
+spec:
+  selector: { app: race-api }
+  ports: [{ port: 8000, targetPort: 8000 }]

@@ -1,0 +1,2 @@
+-r requirements.txt
+ray[default]>=2.30

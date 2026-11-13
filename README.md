@@ -1,138 +1,157 @@
-# RACE: Robust & Adaptive Crowd Evacuation Simulation
+# RACE — Robust & Adaptive Crowd Evacuation
 
-**Research and implementation of robust continuous crowd evacuation and dynamic exit balancing in unseen architectural environments.**
+**An autonomous trajectory simulation, machine-learning prediction and real-time visualization platform.**
 
-[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue.svg)](https://www.python.org/)
-[![Pygame](https://img.shields.io/badge/Pygame-2.6.1-green.svg)](https://www.pygame.org/)
-[![Tests](https://img.shields.io/badge/Tests-45%20Passing-brightgreen.svg)](tests/)
-[![Milestone](https://img.shields.io/badge/Milestone-Review%202-orange.svg)](Review%202/)
+RACE combines a physics-driven pedestrian simulation, an LSTM trajectory forecaster, a FastAPI orchestration backend and a React/TypeScript dashboard. The system is designed to evaluate crowd movement and evacuation behaviour while keeping simulated positions distinct from model-predicted future trajectories.
 
----
+## Platform architecture
 
-## 📌 Repository Overview & Review 2 Milestone
+```text
+React + TypeScript + Vite
+  ├── Live / Mock / Replay data sources
+  ├── Canvas floor-plan layers + WebGL2 agent marker layer (Canvas fallback)
+  └── FPS / render-time / agent-count diagnostics
+                 │ REST + WebSocket
+                 ▼
+FastAPI orchestration backend
+  ├── Simulation lifecycle + 10 Hz frame streaming
+  ├── Dataset ingestion + model inventory/activation
+  ├── Prometheus metrics + OpenTelemetry traces
+  ├── Redis telemetry publisher
+  └── Optional Celery / Ray offline workers
+          │                  │
+          ▼                  ▼
+Simulation engine        LSTM predictor
+  ├── Agent dynamics       ├── 8 observed positions
+  ├── Navigation           ├── 12 predicted positions
+  ├── Obstacles            └── PyTorch / optional ONNX Runtime
+  ├── Collision avoidance
+  └── Quadtree neighbour index
+```
 
-This repository contains the complete implementation, benchmarks, and deliverables for the **RACE (Robust & Adaptive Crowd Evacuation)** project.
+## Repository structure
 
-- 📘 **[Complete Technical & Algorithmic Documentation (Deep Reference Manual)](Review%202/TECHNICAL_DOCUMENTATION.md)**
-- 📑 **[Review 2 Academic Project Report](Review%202/REVIEW_2_REPORT.md)**
+```text
+server/                       FastAPI backend and orchestration
+  api/                        REST, ML, dataset and batch routes
+  core/                       Simulation lifecycle/runtime
+  observability/               Prometheus + OpenTelemetry setup
+  services/                    Dataset, model and telemetry services
+  workers/                     Optional Celery and Ray workers
+  tests/                       Backend tests
+simulation_environment/       Active headless simulation engine
+  simulation/                  Agents, movement, collision, navigation, export
+  ml/                          LSTM inference and optional ONNX runtime
+  tests/                       Simulation and spatial-index tests
+frontend/                      React + TypeScript + Vite dashboard
+ml/                            Training/evaluation utilities and ONNX exporter
+deploy/                        Prometheus, Grafana, OTel and Kubernetes configs
+collaboration/                 Optional Yjs WebSocket sidecar
+Review 2/                      Earlier standalone research/visualization modules
+```
 
-📁 **All Review 2 source code, assets, test fixtures, and comprehensive academic documentation are packaged inside the [`Review 2/`](Review%202/) directory.**
+## Quick start — Windows PowerShell
 
-### Key Engineering Features
-- **Helbing's Social Force Model (SFM):** Continuous 2D vector dynamics (desired drive, interpersonal repulsion, boundary wall friction, and social group cohesion).
-- **Congestion-Aware Dynamic Exit Balancing:** Trailing occupants actively detect doorway bottleneck queues and dynamically re-route to alternative exits.
-- **Realistic Architectural Obstacles:** Information Kiosks, Cedar Benches, Botanical Planters, and Work Desks with physical collision boundaries.
-- **Real-Time Exit Queue Badges:** Real-time doorway status pills (`[Q:0 CLEAR]`, `[Q:1 MODERATE]`, `[Q:X JAMMED!]`).
-- **Visual Diverter Badges:** Glowing golden halos and `⚡ DIVERTER` indicators over agents who dynamically route around bottleneck queues.
-- **1-Click Dynamic Balancing Benchmark (Scenario 5):** Instant demonstration of 20 clustered occupants detecting a jammed doorway and dynamically splitting across open exits (Hotkey `B`).
-- **Multiple Unseen Floor Plans:** Campus Complex, Corporate Office Suites, Airport Transit Terminal, and Procedural Unseen Layouts.
-- **Breadth-First Search (BFS):** Multi-source potential field global navigation guaranteeing shortest-path optimality.
-- **Interactive Mouse Toolkit:** Inspect occupant dossier, drop dynamic fire hazards, and spawn pedestrians on the fly.
-- **Real-Time Live Egress Curve Chart:** Plots cumulative evacuated population vs. time directly on the HUD.
-- **Dynamic Density Heatmap:** Real-time translucent overlay highlighting bottleneck pressure.
+### 1. Backend
 
----
+From the repository root:
 
-## 1. Multiple Architectural Floor Plans & Realistic Obstacles
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r server\requirements.txt
+python -m uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-The system supports multiple distinct architectural complexes:
+The backend loads `simulation_environment/config.json` and the included LSTM checkpoint at `simulation_environment/ml/models/trajectory_lstm_best.pth` when available.
 
-1. **University Student Center & Concourse (Campus Complex):**
-   - 3 large wings (Lecture Hall, Central Atrium, Library) with architectural pillars and 4 cardinal exits.
-2. **Corporate Office & Research Suites:**
-   - Central horizontal spine hallway, 6 partitioned executive & team suites, and 3 dedicated fire exit stairwells.
-3. **Airport Transit Terminal:**
-   - Check-in concourse, narrow security screening choke point (testing severe bottleneck queuing), duty-free islands, and departure gates.
-4. **Procedural Unseen Layout Generator:**
-   - Procedural algorithmic room partitions proving that the BFS pathfinding and continuous physics operate robustly on arbitrary unseen floor plans.
+### 2. Frontend
 
-### Architectural Obstacles Rendered in Each Building:
-- **`[INFO]` Information Kiosk:** Teak/mahogany reception counters in high-traffic concourse intersections.
-- **`[|||]` Cedar Seating Benches:** Real slat benches providing realistic corridor obstacles.
-- **`[🌿]` Botanical Planters:** Lush green foliage planter boxes flanking main pedestrian thoroughfares.
-- **`[💻]` Lecture & Workstation Desks:** Functional student desk pods and office cubicles with computer monitors.
+In a second terminal:
 
-*Cycle between floor plans at any time by pressing **`[L]`** or clicking **`[🏢 Cycle Map]`** on the dashboard.*
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
----
+Open the Vite URL shown in the terminal. Its development proxy forwards `/api` and `/ws` requests to the backend on port 8000.
 
-## 2. Congestion-Aware Dynamic Exit Balancing
+### 3. Docker Compose
 
-In emergency situations, naive agents stubbornly pile into the closest exit, causing deadly crushing bottlenecks while alternative exits sit empty.
+From the repository root:
 
-This simulator implements **Queue-Aware Dynamic Egress Balancing**:
-- For each exit portal $E_k$, the engine tracks the active queue size $Q(E_k)$ within its bottleneck catchment zone.
-- Trailing agents continually evaluate their effective travel cost:
-  $$\text{Cost}(E_k) = \text{Distance}(P_i, E_k) + \alpha \times Q(E_k)$$
-- If an alternative exit portal $E_{\text{alt}}$ offers a significantly faster evacuation time (accounting for walking distance plus doorway queue delay), trailing agents dynamically divert:
-  *"The current exit is jammed! It is faster to walk an extra few meters to the open exit!"*
-- The agent recalculates its BFS path to the alternative exit, updates its trajectory, and visibly displays a golden glowing ring and **`⚡ DIVERTER`** badge.
-- Live exit banners display real-time statuses: `[Q:0 CLEAR]` (green), `[Q:1 MODERATE]` (amber), and `[Q:2+ JAMMED!]` (crimson).
-- **1-Click Demo:** Press **`[B]`** or click **`[⚖️ Scenario 5: Demo Balancing]`** to launch a live showcase where 20 agents cluster at the West Exit and trailing occupants visibly divert to the South and North exits!
+```bash
+docker compose up --build
+```
 
----
+The stack includes the API, frontend, Redis, Prometheus, Grafana, Jaeger and the OpenTelemetry Collector. Optional profiles:
 
-## 3. Technology Stack
+```bash
+docker compose --profile workers up --build
+```
 
-| Component | Technology | Description |
+```bash
+docker compose --profile collaboration up --build
+```
+
+Optional Ray cluster (requires the Ray overlay):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.distributed.yml up --build
+```
+
+See [PRODUCTION_UPGRADE.md](PRODUCTION_UPGRADE.md) for dashboards, ML export, API details, Kubernetes starter manifests and production caveats.
+
+## Core API contract
+
+| Method | Endpoint | Purpose |
 |---|---|---|
-| **Language** | Python 3.11 / 3.13 | High performance, standard math & collections. |
-| **Global Pathfinding** | Multi-Source BFS (`algorithms/pathfinding.py`) | Unweighted shortest path calculation. |
-| **Continuous Physics** | Helbing's Social Force Model (`simulation/physics.py`) | Vector velocity, social repulsion, wall repulsion, group cohesion. |
-| **Exit Balancing** | Dynamic Congestion Heuristic (`simulation/engine.py`) | Queue-aware exit diversion and real-time portal monitoring. |
-| **Visualization & HUD** | Pygame 2.6.1 (`visualization/`) | 60 FPS sub-pixel continuous rendering, live S-curve graph, dossier HUD. |
-| **Testing** | Pytest 9.2.0 (`tests/`) | 45 automated unit tests covering physics, routing, floor plans, obstacles, and balancing. |
+| GET | `/health`, `/ready` | Liveness/readiness |
+| GET | `/metrics` | Prometheus metrics |
+| POST | `/api/simulation/start` | Start/resume live simulation |
+| POST | `/api/simulation/pause` | Pause live simulation |
+| POST | `/api/simulation/reset` | Reset simulation and rebroadcast environment/frame |
+| GET | `/api/simulation/status` | Current simulation status |
+| WS | `/ws/simulation` | Environment then live frame stream |
+| GET | `/api/v1/ml/status` | Predictor status |
+| POST | `/api/v1/ml/predict` | Standalone LSTM prediction |
+| GET | `/api/v1/ml/models` | List available checkpoints |
+| POST | `/api/v1/ml/models/{model_id}/activate` | Validate and activate a checkpoint |
+| POST | `/api/v1/datasets/upload` | Upload normalized trajectory CSV |
+| GET | `/api/v1/datasets` | List uploaded datasets |
+| POST | `/api/v1/simulation/batch` | Submit optional Ray scenario sweep |
+| GET | `/api/v1/simulation/batch/{job_id}` | Check Ray scenario result |
 
----
+The existing frontend WebSocket contract remains intact: environment first, then frames. Actual agent positions are generated by the simulation engine. The LSTM's `predicted` points are advisory forecasts only and do not directly move agents.
 
-## 4. Installation & Execution (Windows 11)
+## Tests
 
-### Step 1: Open PowerShell and Enter Review 2
+Run each suite from the specified working directory:
+
 ```powershell
-cd "c:\Users\DELL\OneDrive\Desktop\capstone project\Review 2"
+# Backend — repository root
+python -m pytest server\tests -q
+
+# Simulation — simulation_environment folder
+cd simulation_environment
+python -m pytest tests -q
+
+# Frontend — frontend folder; Node 22.16+
+cd ..\frontend
+npm test
 ```
 
-### Step 2: Activate the Virtual Environment
-```powershell
-..\venv\Scripts\Activate.ps1
-```
+## Important scientific and deployment boundaries
 
-### Step 3: Run the Application
-```powershell
-python main.py
-```
+- The simulation metadata describes ETH-UCY-compatible coordinate units; it does not establish physical metre calibration. Validate coordinate scale and dataset FPS before interpreting speeds, density or evacuation times as real-world values.
+- The LSTM learns pedestrian trajectory patterns from its training data; it is not itself an evacuation policy or collision-avoidance controller.
+- Redis currently publishes telemetry for downstream consumers. It is not yet a distributed simulation-session coordinator.
+- Keep the live API at one replica until shared simulation ownership, cross-instance WebSocket fan-out, sticky routing and leader/fencing semantics are implemented and load-tested.
+- The Yjs sidecar is infrastructure groundwork; collaborative floor-plan editing is not yet wired into the React UI.
+- Add authentication, authorization, TLS, quotas, audit trails, secret management and backup/restore before exposing the service outside a trusted environment.
 
----
+## Earlier research modules
 
-## 5. Controls & Keyboard Shortcuts
-
-| Feature | Key / Control | What Happens |
-|---|:---:|---|
-| **Demo Dynamic Balancing** | `B` / Button | **1-click benchmark:** 20 occupants queue up at West Exit and trailing crowd visibly diverts! |
-| **Start / Pause** | `SPACE` | Starts, pauses, or resumes the simulation. |
-| **Cycle Floor Plans** | `L` / Button | Switch between Campus, Corporate Office, Airport Terminal, and Procedural plans. |
-| **Toggle Exit Balancing** | `C` / Button | Toggles Congestion-Aware Rerouting on/off to compare standard vs. balanced egress. |
-| **Inspect Person** | `I` / Left-Click | Click any person to see their dossier, speed, stress level, and path ribbon. |
-| **Drop Fire Hazard** | `F` / Left-Click | Click to drop a fire. Watch people steer around it! Right-click to extinguish. |
-| **Spawn Person** | `P` / Left-Click | Click to spawn a new pedestrian anywhere on the floor. |
-| **Panic Level** | `1`, `2`, `3` | Switch between Calm ($1.2\text{ m/s}$), Alert ($1.8\text{ m/s}$), and Panic ($2.6\text{ m/s}$). |
-| **Density Heatmap** | `H` | Toggle dynamic crowd density heatmap overlay. |
-| **Mode Switcher** | `M` | Switch between Everyday Circulation and Emergency Evacuation. |
-| **Reset** | `R` | Reset crowd to initial starting condition. |
-| **New Seed** | `N` | Respawn crowd with new names and companion pairings. |
-| **Cycle Speed** | `S` | Adjusts simulation speed ($1.0\times \rightarrow 2.0\times \rightarrow 4.0\times \rightarrow 0.5\times$). |
-
----
-
-## 6. Automated Testing (45 Tests)
-
-Run the full automated test suite inside the Review 2 directory:
-```powershell
-cd "Review 2"
-pytest -v
-```
-All 45 tests verify:
-- BFS optimal pathfinding on all floor plans.
-- Helbing continuous social force physics & wall repulsion.
-- Architectural obstacle collision and placement (Kiosk, Bench, Planter, Desk).
-- Dynamic congestion queue detection and real-time agent rerouting.
+`Review 2/` contains earlier standalone algorithms, agent controllers, floor-plan modules, physics engines and Pygame visualization/reporting assets. It is retained for academic reference; the active browser live path is `simulation_environment/` + `server/` + `frontend/`.

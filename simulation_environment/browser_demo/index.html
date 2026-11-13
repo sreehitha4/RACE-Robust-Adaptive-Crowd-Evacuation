@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>RACE - Crowd Simulation Preview</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: #101827;
+            color: #e5e7eb;
+            font-family: system-ui, Arial, sans-serif;
+        }
+
+        header {
+            padding: 14px 20px;
+            background: #172338;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 9px 18px;
+            border: 0;
+            border-radius: 7px;
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+            font-size: 15px;
+        }
+
+        button.secondary {
+            background: #475569;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button:hover:not(:disabled) {
+            filter: brightness(1.15);
+        }
+
+        .wrap {
+            padding: 16px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 280px;
+            gap: 16px;
+        }
+
+        canvas {
+            width: 100%;
+            height: auto;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 2px solid #64748b;
+        }
+
+        .panel {
+            background: #172338;
+            padding: 18px;
+            border-radius: 10px;
+        }
+
+        .metric {
+            font-size: 25px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .muted {
+            color: #94a3b8;
+            font-size: 13px;
+        }
+
+        .legend {
+            line-height: 1.8;
+        }
+
+        #status {
+            font-weight: 600;
+        }
+
+        @media (max-width: 800px) {
+            .wrap {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <strong>RACE · Crowd Simulation Preview</strong>
+
+    <button id="startBtn" onclick="control('start')">
+        Start
+    </button>
+
+    <button id="pauseBtn" class="secondary" onclick="control('pause')">
+        Pause
+    </button>
+
+    <button id="resetBtn" class="secondary" onclick="control('reset')">
+        Reset
+    </button>
+
+    <span class="muted" id="status">
+        Connecting...
+    </span>
+</header>
+
+<div class="wrap">
+
+    <canvas id="scene" width="1000" height="700"></canvas>
+
+    <aside class="panel">
+
+        <h3>Simulation statistics</h3>
+
+        <div class="muted">Agents</div>
+        <div class="metric" id="agents">—</div>
+
+        <div class="muted">Evacuated</div>
+        <div class="metric" id="evacuated">—</div>
+
+        <div class="muted">Remaining</div>
+        <div class="metric" id="remaining">—</div>
+
+        <div class="muted">Simulation time</div>
+        <div class="metric" id="time">—</div>
+
+        <p class="muted" id="ml">
+            LSTM enabled: —
+        </p>
+
+        <hr>
+
+        <div class="muted legend">
+            <div>🔵 Blue circles: Active pedestrians</div>
+            <div>🟢 Green circles: Evacuated pedestrians</div>
+            <div>🟠 Orange dashed lines: LSTM predictions</div>
+            <div>⬛ Grey blocks: Obstacles</div>
+            <div>🟩 Green bars: Exits</div>
+        </div>
+
+    </aside>
+
+</div>
+
+<script>
+
+const canvas = document.getElementById("scene");
+const ctx = canvas.getContext("2d");
+
+let controlInProgress = false;
+let lastState = null;
+
+
+// --------------------------------------------------
+// CONTROL BUTTONS
+// --------------------------------------------------
+
+async function control(action) {
+
+    if (controlInProgress) return;
+
+    controlInProgress = true;
+
+    const buttons = [
+        document.getElementById("startBtn"),
+        document.getElementById("pauseBtn"),
+        document.getElementById("resetBtn")
+    ];
+
+    buttons.forEach(button => button.disabled = true);
+
+    try {
+
+        const response = await fetch("/" + action, {
+            method: "POST",
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                "Server returned HTTP " + response.status
+            );
+        }
+
+        const state = await response.json();
+
+        lastState = state;
+
+        draw(state);
+
+        console.log(action + " successful", state);
+
+    } catch (error) {
+
+        console.error("Control error:", error);
+
+        document.getElementById("status").textContent =
+            "Error: " + error.message;
+
+    } finally {
+
+        controlInProgress = false;
+
+        buttons.forEach(button => button.disabled = false);
+
+    }
+}
+
+
+// --------------------------------------------------
+// DRAW ENVIRONMENT
+// --------------------------------------------------
+
+function draw(state) {
+
+    if (!state || !state.environment) {
+        console.error("Invalid simulation state", state);
+        return;
+    }
+
+    const environment = state.environment;
+
+    const sx = canvas.width / environment.width;
+    const sy = canvas.height / environment.height;
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    // Background
+
+    ctx.fillStyle = "#f8fafc";
+
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    // Boundary
+
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 5;
+
+    ctx.strokeRect(
+        2,
+        2,
+        canvas.width - 4,
+        canvas.height - 4
+    );
+
+
+    // --------------------------------------------------
+    // OBSTACLES
+    // --------------------------------------------------
+
+    for (const obstacle of environment.obstacles || []) {
+
+        if (!obstacle.length) continue;
+
+        ctx.fillStyle = "#64748b";
+
+        ctx.beginPath();
+
+        obstacle.forEach((point, index) => {
+
+            const px = point[0] * sx;
+            const py = point[1] * sy;
+
+            if (index === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+
+        });
+
+        ctx.closePath();
+        ctx.fill();
+
+    }
+
+
+    // --------------------------------------------------
+    // EXITS
+    // --------------------------------------------------
+
+    for (const exit of environment.exits || []) {
+
+        ctx.fillStyle = "#16a34a";
+
+        ctx.fillRect(
+            (exit.x - 0.15) * sx,
+            (exit.y - 0.8) * sy,
+            0.3 * sx,
+            1.6 * sy
+        );
+
+    }
+
+
+    // --------------------------------------------------
+    // PEDESTRIANS AND LSTM PREDICTIONS
+    // --------------------------------------------------
+
+    for (const agent of state.agents || []) {
+
+        const x = Number(agent.x);
+        const y = Number(agent.y);
+
+        if (
+            !Number.isFinite(x) ||
+            !Number.isFinite(y)
+        ) {
+            continue;
+        }
+
+        const screenX = x * sx;
+        const screenY = y * sy;
+
+
+        // LSTM predicted trajectory
+
+        const predictions = agent.predicted_trajectory || [];
+
+        if (predictions.length > 0) {
+
+            ctx.save();
+
+            ctx.setLineDash([8, 6]);
+
+            ctx.strokeStyle = "#f59e0b";
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+
+            ctx.moveTo(screenX, screenY);
+
+            predictions.forEach(point => {
+
+                if (
+                    Array.isArray(point) &&
+                    Number.isFinite(point[0]) &&
+                    Number.isFinite(point[1])
+                ) {
+
+                    ctx.lineTo(
+                        point[0] * sx,
+                        point[1] * sy
+                    );
+
+                }
+
+            });
+
+            ctx.stroke();
+
+            ctx.restore();
+
+        }
+
+
+        // Actual pedestrian
+
+        const agentRadius = Number(agent.radius);
+
+        const radius = Number.isFinite(agentRadius)
+            ? Math.max(7, agentRadius * sx)
+            : 9;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            screenX,
+            screenY,
+            radius,
+            0,
+            Math.PI * 2
+        );
+
+        if (agent.state === "evacuated") {
+
+            ctx.fillStyle = "#16a34a";
+
+        } else {
+
+            ctx.fillStyle = "#2563eb";
+
+        }
+
+        ctx.fill();
+
+        // White outline
+
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+
+        ctx.stroke();
+
+    }
+
+
+    // --------------------------------------------------
+    // STATISTICS
+    // --------------------------------------------------
+
+    const statistics = state.statistics || {};
+
+    document.getElementById("agents").textContent =
+        statistics.total_agents ?? (state.agents || []).length;
+
+    document.getElementById("evacuated").textContent =
+        state.evacuated_count ?? statistics.evacuated_count ?? 0;
+
+    document.getElementById("remaining").textContent =
+        state.remaining_agents ?? statistics.remaining_agents ?? 0;
+
+    const simulationTime = Number(state.simulation_time);
+
+    document.getElementById("time").textContent =
+        (Number.isFinite(simulationTime) ? simulationTime.toFixed(1) : "0.0") + " s";
+
+    document.getElementById("status").textContent =
+        state.status || "Unknown";
+
+    document.getElementById("ml").textContent =
+        "LSTM enabled: " + Boolean(state.ml_enabled);
+
+}
+
+
+// --------------------------------------------------
+// FETCH LIVE SIMULATION STATE
+// --------------------------------------------------
+
+async function tick() {
+
+    try {
+
+        const response = await fetch("/state", {
+            method: "GET",
+            cache: "no-store"
+        });
+
+        if (!response.ok) {
+            throw new Error(
+                "Server returned HTTP " + response.status
+            );
+        }
+
+        const state = await response.json();
+
+        lastState = state;
+
+        draw(state);
+
+    } catch (error) {
+
+        console.error("State update error:", error);
+
+        document.getElementById("status").textContent =
+            "Server unavailable";
+
+    }
+
+}
+
+
+// --------------------------------------------------
+// AUTOMATIC REFRESH
+// --------------------------------------------------
+
+setInterval(tick, 150);
+
+tick();
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "uid": "race-overview",
+  "title": "RACE Platform Overview",
+  "tags": ["race", "simulation"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "Simulation step latency (p95)", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(race_simulation_step_seconds_bucket[5m])) by (le))", "refId": "A"}]},
+    {"id": 2, "type": "timeseries", "title": "ML inference latency (p95)", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(race_ml_inference_seconds_bucket[5m])) by (le))", "refId": "A"}]},
+    {"id": 3, "type": "timeseries", "title": "Active agents", "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}, "targets": [{"expr": "race_simulation_active_agents", "refId": "A"}]},
+    {"id": 4, "type": "timeseries", "title": "WebSocket connections", "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}, "targets": [{"expr": "race_websocket_connections", "refId": "A"}]},
+    {"id": 5, "type": "timeseries", "title": "Simulation frame rate", "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8}, "targets": [{"expr": "race_simulation_frames_per_second", "refId": "A"}]},
+    {"id": 6, "type": "timeseries", "title": "LSTM one-step forecast error (p95)", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(race_ml_one_step_forecast_error_bucket[5m])) by (le))", "refId": "A"}]},
+    {"id": 7, "type": "timeseries", "title": "Forecast error alerts", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}, "targets": [{"expr": "increase(race_ml_forecast_error_alerts_total[5m])", "refId": "A"}]}
+  ]
+}

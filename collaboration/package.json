@@ -1,0 +1,8 @@
+{
+  "name": "race-collaboration-service",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "start": "y-websocket" },
+  "dependencies": { "y-websocket": "^2.1.0" }
+}

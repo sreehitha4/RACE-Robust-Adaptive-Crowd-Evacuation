@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Agent } from "./contract.ts";
 import { draw, toWorld, type Layers, type View } from "./render.ts";
 import type { RunStore } from "./store.ts";
+import { WebGLAgentRenderer } from "./webglAgents.ts";
 
 interface Props {
   store: RunStore;
@@ -13,7 +14,9 @@ interface Props {
 /** The floor-plan canvas. Draws every animation frame from the store; React only passes options in. */
 export function Stage({ store, layers, selected, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const webglRef = useRef<HTMLCanvasElement>(null);
   const readoutRef = useRef<HTMLDivElement>(null);
+  const performanceRef = useRef<HTMLDivElement>(null);
   const live = useRef({ layers, selected, view: null as View | null, agents: [] as Agent[] });
   live.current.layers = layers;
   live.current.selected = selected;
@@ -21,8 +24,13 @@ export function Stage({ store, layers, selected, onSelect }: Props) {
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
+    let webgl: WebGLAgentRenderer | null = null;
+    try { if (webglRef.current) webgl = new WebGLAgentRenderer(webglRef.current); } catch { webgl = null; }
     let raf = 0;
+    let frames = 0;
+    let windowStarted = performance.now();
     const loop = () => {
+      const renderStarted = performance.now();
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -33,11 +41,21 @@ export function Stage({ store, layers, selected, onSelect }: Props) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const l = live.current;
       l.agents = store.agentsAt(performance.now());
-      l.view = draw(ctx, w, h, store, l.agents, l.layers, l.selected);
+      l.view = draw(ctx, w, h, store, l.agents, l.layers, l.selected, !webgl);
+      if (webgl && l.view) webgl.draw(l.agents, l.view, w, h, dpr, l.selected);
+      frames += 1;
+      const now = performance.now();
+      if (now - windowStarted >= 500) {
+        const fps = Math.round(frames * 1000 / (now - windowStarted));
+        const renderMs = now - renderStarted;
+        if (performanceRef.current) performanceRef.current.textContent = `${fps} FPS · ${renderMs.toFixed(1)} ms · ${l.agents.length} agents`;
+        frames = 0;
+        windowStarted = now;
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); webgl?.dispose(); };
   }, [store]);
 
   const worldAt = (e: React.PointerEvent | React.MouseEvent) => {
@@ -72,7 +90,9 @@ export function Stage({ store, layers, selected, onSelect }: Props) {
           onSelect(best?.id ?? null);
         }}
       />
+      <canvas ref={webglRef} className="stage-webgl" aria-hidden="true" />
       <div className="readout" ref={readoutRef} aria-hidden />
+      <div className="performance-readout" ref={performanceRef} aria-hidden="true">Measuring renderer…</div>
     </div>
   );
 }

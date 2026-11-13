@@ -128,6 +128,7 @@ export function draw(
   agents: Agent[],
   layers: Layers,
   selected: Agent["id"] | null,
+  drawAgentBodies = true,
 ): View | null {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, w, h);
@@ -257,7 +258,7 @@ export function draw(
 
   const r = Math.max(3, 0.25 * s);
   ctx.lineCap = "round";
-  for (const a of agents) {
+  if (drawAgentBodies) for (const a of agents) {
     const [x, y] = toScreen(v, a.x, a.y);
     const color = stateColor(a.state);
     if (a.state === "waiting") {

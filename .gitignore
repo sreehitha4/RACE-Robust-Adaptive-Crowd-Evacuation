@@ -34,15 +34,9 @@ Desktop.ini
 *.tmp
 *_files/
 
+# Local RACE runtime data
 .venv/
-
-# Python virtual environments
-.venv/
-
-# Python cache files
-__pycache__/
-*.py[cod]
-.pytest_cache/
-
-# Environment variables
-.env
+data/datasets/
+*.log
+simulation_environment/ml/models/*.onnx
+simulation_environment/ml/models/active_model.json
